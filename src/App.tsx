@@ -821,15 +821,127 @@ const App: React.FC = () => {
 
       <style>{`
         @media print {
-          @page { size: landscape A4; margin: 10mm; }
-          body { background: white; -webkit-print-color-adjust: exact; print-color-adjust: exact; margin: 0; padding: 0; display: block; }
+          @page {
+            size: 297mm 210mm;
+            margin: 10mm;
+          }
+          html, body {
+            width: 100% !important;
+            height: 100% !important;
+            background: white !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            display: block !important;
+          }
           .no-print { display: none !important; }
           .print-hidden { display: none !important; }
           .print-block { display: block !important; }
           .print-flex { display: flex !important; }
-          .avoid-break { page-break-inside: avoid !important; }
-          .print-center-page { height: 100vh; width: 100%; display: flex !important; flex-direction: column !important; justify-content: center !important; align-items: center !important; page-break-after: always !important; page-break-inside: avoid !important; box-sizing: border-box; }
-          .print-content-wrapper { width: 100% !important; max-width: 277mm !important; }
+          .avoid-break { page-break-inside: avoid !important; break-inside: avoid !important; }
+          
+          /* Page Container: exactly 190mm printable height, centered vertically & horizontally */
+          .print-center-page {
+            width: 277mm !important;
+            max-width: 277mm !important;
+            height: 190mm !important;
+            min-height: 190mm !important;
+            max-height: 190mm !important;
+            display: flex !important;
+            flex-direction: column !important;
+            justify-content: center !important;
+            align-items: center !important;
+            page-break-before: auto !important;
+            page-break-after: always !important;
+            page-break-inside: avoid !important;
+            break-after: page !important;
+            break-inside: avoid !important;
+            box-sizing: border-box !important;
+            margin: 0 auto !important;
+            padding: 0 !important;
+            position: relative !important;
+            overflow: hidden !important;
+          }
+          .print-center-page:last-child {
+            page-break-after: auto !important;
+            break-after: auto !important;
+          }
+
+          /* Outer Frame: exactly 186mm uniform height on EVERY page, centered on 190mm page */
+          .print-content-wrapper {
+            width: 277mm !important;
+            max-width: 277mm !important;
+            box-sizing: border-box !important;
+            margin: 0 auto !important;
+          }
+
+          .print-item-frame {
+            width: 277mm !important;
+            max-width: 277mm !important;
+            height: 186mm !important;
+            min-height: 186mm !important;
+            max-height: 186mm !important;
+            border: 2px solid #1f2937 !important;
+            border-radius: 4px !important;
+            padding: 2px !important;
+            background: white !important;
+            display: flex !important;
+            flex-direction: column !important;
+            box-sizing: border-box !important;
+            overflow: hidden !important;
+            margin: 0 auto !important;
+          }
+
+          .print-inner-grid {
+            width: 100% !important;
+            height: 100% !important;
+            min-height: 100% !important;
+            max-height: 100% !important;
+            display: flex !important;
+            flex-direction: row !important;
+            border: 1px solid #d1d5db !important;
+            box-sizing: border-box !important;
+            overflow: hidden !important;
+            background: white !important;
+            margin-top: 0 !important;
+          }
+
+          .print-left-col {
+            width: 70% !important;
+            min-width: 70% !important;
+            max-width: 70% !important;
+            height: 100% !important;
+            display: flex !important;
+            flex-direction: column !important;
+            border-right: 1px solid #d1d5db !important;
+            box-sizing: border-box !important;
+            overflow: hidden !important;
+          }
+
+          .print-right-col {
+            width: 30% !important;
+            min-width: 30% !important;
+            max-width: 30% !important;
+            height: 100% !important;
+            display: flex !important;
+            flex-direction: column !important;
+            justify-content: space-between !important;
+            box-sizing: border-box !important;
+            overflow: hidden !important;
+            padding: 0 !important;
+          }
+
+          .print-cards-grid {
+            height: 48mm !important;
+            min-height: 48mm !important;
+            max-height: 48mm !important;
+            flex-shrink: 0 !important;
+            overflow: hidden !important;
+            box-sizing: border-box !important;
+            padding: 4px !important;
+          }
+
           .whitespace-pre-wrap { white-space: pre-wrap !important; word-break: break-word !important; }
           select { display: none !important; }
           
@@ -986,7 +1098,7 @@ const App: React.FC = () => {
 
         <hr className="my-6 border-gray-300 no-print" />
 
-        <div className="space-y-10 print:space-y-0 w-full flex flex-col items-center">
+        <div className="space-y-10 print:space-y-0 w-full flex flex-col items-center print:block">
           {items.map((item, index) => {
             const primaryArea = item.areas[0] || {};
             const sMain1 = primaryArea.styleMain1 || item.styleMain1 || item.styleMain || '';
@@ -1106,8 +1218,8 @@ const App: React.FC = () => {
 
             return (
               <div key={item.id} className="print-center-page w-full relative mb-10 print:mb-0">
-                <div className="print-content-wrapper w-full border-2 border-gray-800 p-1 relative rounded bg-white hover:z-50 transition-all duration-300 shadow-sm hover:shadow-md">
-                  <div className="absolute top-0 left-0 bg-gray-800 text-white px-4 py-1.5 text-sm font-bold z-10 rounded-br flex items-center gap-2">
+                <div className="print-content-wrapper print-item-frame w-full border-2 border-gray-800 p-1 relative rounded bg-white hover:z-50 transition-all duration-300 shadow-sm hover:shadow-md">
+                  <div className="absolute top-0 left-0 bg-gray-800 text-white px-4 py-1.5 text-sm font-bold z-10 rounded-br flex items-center gap-2 no-print">
                     <span>รายการที่ {index + 1}</span>
                     {item.aiImage && (
                       <span onClick={() => setView('ai-preview')} className="no-print cursor-pointer bg-indigo-600 hover:bg-indigo-700 text-white px-2 py-0.5 text-[11px] font-bold rounded-full flex items-center gap-1 shadow-sm transition-colors" title="คลิกเพื่อดูรูป AI">
@@ -1124,14 +1236,14 @@ const App: React.FC = () => {
                     <button onClick={() => removeItem(item.id)} className="bg-red-500 text-white rounded-full p-2 hover:bg-red-600 shadow-md transition-transform hover:scale-110" title="ลบ"><Trash2 size={16} /></button>
                   </div>
 
-                  <div className="border border-gray-300 flex flex-col lg:flex-row print:flex-row h-auto lg:h-[750px] print:h-[185mm] mt-8 md:mt-0 bg-white relative overflow-hidden w-full box-border">
-                    <div className="w-full lg:w-[70%] print:w-[70%] min-h-[400px] h-[50vh] sm:h-[60vh] lg:h-full print:h-full border-b lg:border-b-0 print:border-b-0 lg:border-r print:border-r border-gray-300 flex flex-col bg-white relative z-20">
+                  <div className="print-inner-grid border border-gray-300 flex flex-col lg:flex-row print:flex-row h-auto lg:h-[750px] mt-8 md:mt-0 bg-white relative overflow-hidden w-full box-border">
+                    <div className="print-left-col w-full lg:w-[70%] min-h-[400px] h-[50vh] sm:h-[60vh] lg:h-full border-b lg:border-b-0 print:border-b-0 lg:border-r print:border-r border-gray-300 flex flex-col bg-white relative z-20">
                       
                       <div className="flex-1 w-full border-b border-gray-300 flex flex-col relative bg-gray-100 shrink-0 overflow-hidden">
                         <ImageAreaEditor item={item} appDB={appDB} handleItemChange={handleItemChange} setDialog={setDialog} idPrefix={`print-${index}`} generalInfo={generalInfo} />
                       </div>
                       
-                      <div className="h-[25%] lg:h-[30%] print:h-[30%] min-h-[100px] w-full p-2 bg-gray-50 flex items-center overflow-x-auto">
+                      <div className="print-cards-grid h-[25%] lg:h-[30%] min-h-[100px] w-full p-2 bg-gray-50 flex items-center overflow-x-auto">
                         <div className="w-full h-full min-w-[350px] md:min-w-[400px] grid grid-cols-4 gap-1.5 sm:gap-2 print:gap-4">
                           <InfoCard title="รูปแบบม่าน" imgUrl={styleImg1} text1={`${sMain1 || '-'} ${item.layers === 2 ? `/ ${sMain2 || '-'}` : ''}`} fallbackType="style" />
                           <InfoCard 
@@ -1154,14 +1266,14 @@ const App: React.FC = () => {
                       </div>
                     </div>
 
-                    <div className="w-full lg:w-[30%] print:w-[30%] text-xs flex flex-col bg-white overflow-y-auto print:overflow-visible min-h-[400px] lg:h-full print:h-auto relative z-10 print:justify-start">
+                    <div className="print-right-col w-full lg:w-[30%] text-xs flex flex-col bg-white overflow-y-auto print:overflow-hidden min-h-[400px] lg:h-full relative z-10">
                       <div className="bg-gray-800 text-white p-3 print:bg-white print:text-black print:p-3 print:pb-0 flex flex-col shrink-0">
                         <span className="mb-1 text-gray-300 print-hidden font-bold text-xs">ห้อง / ตำแหน่ง :</span>
                         <textarea value={item.roomPos} onChange={(e)=>handleItemChange(item.id, 'roomPos', e.target.value)} className="w-full bg-transparent outline-none border-b border-gray-500 focus:border-white resize-none text-sm font-bold leading-tight print-hidden placeholder-gray-400 text-yellow-300" placeholder="ระบุห้อง เช่น ชั้น 1 / โถงกลม บานที่ 1" rows={2} />
                         <div className="hidden print-block w-full text-[15px] font-bold leading-tight text-black whitespace-pre-wrap border-b border-gray-800 pb-2 mb-1">{item.roomPos || '-'}</div>
                       </div>
                       
-                      <div className="p-3 print:p-2 flex flex-col justify-start gap-4 print:gap-3 h-full print:h-auto print:justify-start">
+                      <div className="p-3 print:p-2 flex flex-col justify-between gap-4 print:gap-1.5 h-full flex-1 overflow-hidden">
                         <div className="border border-gray-300 p-2 rounded bg-gray-50 no-print">
                           <div className="flex justify-between items-center mb-2 border-b border-gray-300 pb-1">
                             <span className="font-bold text-gray-800 text-[14px]">รายละเอียดวัสดุ/ผ้า</span>

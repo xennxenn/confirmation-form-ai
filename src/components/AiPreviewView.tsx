@@ -543,10 +543,18 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
       {/* Print Specific CSS */}
       <style>{`
         @media print {
-          body {
+          @page {
+            size: 297mm 210mm;
+            margin: 10mm;
+          }
+          html, body {
             background: white !important;
             margin: 0 !important;
             padding: 0 !important;
+            width: 100% !important;
+            height: 100% !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
           }
           .no-print {
             display: none !important;
@@ -555,11 +563,90 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
             display: none !important;
           }
           .ai-preview-page {
+            width: 277mm !important;
+            max-width: 277mm !important;
+            height: 190mm !important;
+            min-height: 190mm !important;
+            max-height: 190mm !important;
+            display: flex !important;
+            flex-direction: column !important;
+            justify-content: center !important;
+            align-items: center !important;
+            page-break-before: auto !important;
             page-break-after: always !important;
+            page-break-inside: avoid !important;
             break-after: page !important;
-            margin: 0 !important;
+            break-inside: avoid !important;
+            box-sizing: border-box !important;
+            margin: 0 auto !important;
+            padding: 0 !important;
+            overflow: hidden !important;
             box-shadow: none !important;
-            border-color: #1f2937 !important;
+          }
+          .ai-preview-page:last-child {
+            page-break-after: auto !important;
+            break-after: auto !important;
+          }
+          .ai-preview-frame {
+            width: 277mm !important;
+            max-width: 277mm !important;
+            height: 186mm !important;
+            min-height: 186mm !important;
+            max-height: 186mm !important;
+            border: 2px solid #1f2937 !important;
+            border-radius: 4px !important;
+            padding: 2px !important;
+            background: white !important;
+            display: flex !important;
+            flex-direction: column !important;
+            box-sizing: border-box !important;
+            overflow: hidden !important;
+            margin: 0 auto !important;
+            box-shadow: none !important;
+          }
+          .ai-preview-inner-grid {
+            width: 100% !important;
+            height: 100% !important;
+            min-height: 100% !important;
+            max-height: 100% !important;
+            display: flex !important;
+            flex-direction: row !important;
+            border: 1px solid #d1d5db !important;
+            box-sizing: border-box !important;
+            overflow: hidden !important;
+            background: white !important;
+          }
+          .ai-preview-left-col {
+            width: 70% !important;
+            min-width: 70% !important;
+            max-width: 70% !important;
+            height: 100% !important;
+            display: flex !important;
+            flex-direction: column !important;
+            border-right: 1px solid #d1d5db !important;
+            box-sizing: border-box !important;
+            overflow: hidden !important;
+          }
+          .ai-preview-right-col {
+            width: 30% !important;
+            min-width: 30% !important;
+            max-width: 30% !important;
+            height: 100% !important;
+            display: flex !important;
+            flex-direction: column !important;
+            justify-content: space-between !important;
+            box-sizing: border-box !important;
+            overflow: hidden !important;
+            padding: 0 !important;
+          }
+          .ai-preview-cards-grid {
+            height: 48mm !important;
+            min-height: 48mm !important;
+            max-height: 48mm !important;
+            flex-shrink: 0 !important;
+            overflow: hidden !important;
+            box-sizing: border-box !important;
+            padding: 4px !important;
           }
         }
       `}</style>
@@ -918,11 +1005,11 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
               </div>
 
               {/* Exact Confirmation Form Sheet Border & Layout Matching image.png */}
-              <div className="border-2 border-gray-800 p-1 rounded bg-white shadow-md">
-                <div className="border border-gray-300 flex flex-col lg:flex-row print:flex-row h-auto lg:h-[750px] print:h-[185mm] bg-white relative overflow-hidden w-full box-border">
+              <div className="ai-preview-frame border-2 border-gray-800 p-1 rounded bg-white shadow-md">
+                <div className="ai-preview-inner-grid border border-gray-300 flex flex-col lg:flex-row print:flex-row h-auto lg:h-[750px] bg-white relative overflow-hidden w-full box-border">
                   
                   {/* Left Column: 70% width */}
-                  <div className="w-full lg:w-[70%] print:w-[70%] min-h-[400px] h-[50vh] sm:h-[60vh] lg:h-full print:h-full border-b lg:border-b-0 print:border-b-0 lg:border-r print:border-r border-gray-300 flex flex-col bg-white relative z-20">
+                  <div className="ai-preview-left-col w-full lg:w-[70%] min-h-[400px] h-[50vh] sm:h-[60vh] lg:h-full border-b lg:border-b-0 print:border-b-0 lg:border-r print:border-r border-gray-300 flex flex-col bg-white relative z-20">
                     
                     {/* Top 70-75%: On-site window image area (AI / Original / Compare) */}
                     <div className="flex-1 w-full border-b border-gray-300 flex flex-col relative bg-gray-900 shrink-0 overflow-hidden items-center justify-center">
@@ -1006,7 +1093,7 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
                     </div>
 
                     {/* Bottom 25-30%: The 4 Exact Info Cards matching image.png */}
-                    <div className="h-[25%] lg:h-[30%] print:h-[30%] min-h-[100px] w-full p-2 bg-gray-50 flex items-center overflow-x-auto">
+                    <div className="ai-preview-cards-grid h-[25%] lg:h-[30%] min-h-[100px] w-full p-2 bg-gray-50 flex items-center overflow-x-auto">
                       <div className="w-full h-full min-w-[350px] md:min-w-[400px] grid grid-cols-4 gap-1.5 sm:gap-2 print:gap-4">
                         {/* Card 1: รูปแบบม่าน */}
                         <InfoCard
@@ -1047,7 +1134,7 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
                   </div>
 
                   {/* Right Column: 30% width matching image.png exactly */}
-                  <div className="w-full lg:w-[30%] print:w-[30%] text-xs flex flex-col bg-white overflow-y-auto print:overflow-visible min-h-[400px] lg:h-full print:h-auto relative z-10 justify-start">
+                  <div className="ai-preview-right-col w-full lg:w-[30%] text-xs flex flex-col bg-white overflow-y-auto print:overflow-hidden min-h-[400px] lg:h-full relative z-10 justify-start">
                     
                     {/* Room Header */}
                     <div className="bg-gray-800 text-white p-3 print:bg-white print:text-black print:p-3 print:pb-0 flex flex-col shrink-0">
@@ -1056,7 +1143,7 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
                       </div>
                     </div>
 
-                    <div className="p-3 print:p-2 flex flex-col justify-start gap-4 print:gap-3 h-full print:h-auto">
+                    <div className="p-3 print:p-2 flex flex-col justify-between gap-4 print:gap-1.5 h-full flex-1 overflow-hidden">
                       
                       {/* รูปแบบและขนาดม่าน */}
                       <div className="w-full">
