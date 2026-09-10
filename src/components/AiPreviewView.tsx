@@ -3,11 +3,12 @@ import {
   ArrowLeft, Sparkles, Printer, CheckSquare, Square, 
   Download, RefreshCw, Sliders, Check, AlertCircle, 
   Eye, Layers, Image as ImageIcon, Save, Trash2, X,
-  Undo, Redo, Share2
+  Undo, Redo, Share2, FileText
 } from 'lucide-react';
 import { CurtainItem, GeneralInfo } from '../types';
 import { InfoCard } from './InfoCard';
 import { buildCurtainAiPrompt } from '../utils/aiCurtainPrompt';
+import { optImg } from '../utils';
 
 interface AiPreviewViewProps {
   items: CurtainItem[];
@@ -27,6 +28,7 @@ interface AiPreviewViewProps {
   saveStatus?: string | null;
   onSharePDF?: () => void;
   onPrint?: () => void;
+  logoSrc?: string;
 }
 
 export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
@@ -47,9 +49,12 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
   saveStatus = null,
   onSharePDF,
   onPrint,
+  logoSrc = "https://lh3.googleusercontent.com/d/1xT2ysUSWkTcFxs1ztoGxZuQcnO_c66Tu",
 }) => {
   // Page selection for printing & batch operations
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set(items.map(i => i.id)));
+  // Toggle cover page inclusion in PDF (defaults to true)
+  const [includeCoverPage, setIncludeCoverPage] = useState(true);
   // View mode per item: 'ai' | 'original' | 'split'
   const [viewModes, setViewModes] = useState<Record<string, 'ai' | 'original' | 'split'>>({});
   // Generating status per item
@@ -522,11 +527,18 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
   };
 
   const handlePrintSelected = () => {
-    if (selectedIds.size === 0) {
+    if (selectedIds.size === 0 && !includeCoverPage) {
       setDialog({ type: 'alert', message: 'กรุณาเลือกหน้าที่ต้องการพิมพ์อย่างน้อย 1 หน้า' });
       return;
     }
-    window.print();
+    const originalTitle = document.title;
+    document.title = `ใบสรุปงานติดตั้งผ้าม่าน คุณ ${generalInfo.customerName || 'ลูกค้า'}`;
+    try {
+      window.print();
+    } catch (e) {
+      console.error(e);
+    }
+    setTimeout(() => { document.title = originalTitle; }, 2000);
   };
 
   const downloadImage = (url: string, filename: string) => {
@@ -555,12 +567,17 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
             height: 100% !important;
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
+            display: block !important;
           }
           .no-print {
             display: none !important;
           }
           .print-hidden-unselected {
             display: none !important;
+          }
+          .avoid-break {
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
           }
           .ai-preview-page {
             width: 277mm !important;
@@ -583,9 +600,10 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
             overflow: hidden !important;
             box-shadow: none !important;
           }
-          .ai-preview-page:last-child {
-            page-break-after: auto !important;
-            break-after: auto !important;
+          .ai-preview-page-last,
+          .ai-preview-page:last-of-type {
+            page-break-after: avoid !important;
+            break-after: avoid !important;
           }
           .ai-preview-frame {
             width: 277mm !important;
@@ -732,7 +750,7 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
               onClick={handlePrintSelected}
               className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white px-4 py-1.5 rounded-lg text-sm font-bold shadow-md transition-all"
             >
-              <Printer size={16} /> พิมพ์ / PDF ({selectedIds.size} หน้า)
+              <Printer size={16} /> พิมพ์ / PDF ({selectedIds.size + (includeCoverPage ? 1 : 0)} หน้า)
             </button>
           </div>
         </div>
@@ -756,7 +774,22 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
                 ล้างการเลือก
               </button>
 
-              <div className="flex flex-wrap gap-1.5 ml-2">
+              <div className="flex flex-wrap items-center gap-1.5 ml-2">
+                {/* Cover page toggle button */}
+                <button
+                  onClick={() => setIncludeCoverPage(prev => !prev)}
+                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded border text-xs font-bold transition-all ${
+                    includeCoverPage
+                      ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
+                      : 'bg-white text-gray-700 border-gray-300 hover:border-gray-400'
+                  }`}
+                  title="รวมใบปะหน้าสรุปงานในหน้าแรกของเอกสาร PDF"
+                >
+                  {includeCoverPage ? <CheckSquare size={12} /> : <Square size={12} />}
+                  <FileText size={12} />
+                  <span>ใบปะหน้า (หน้าแรก)</span>
+                </button>
+
                 {items.map((item, idx) => {
                   const isSelected = selectedIds.has(item.id);
                   const hasAi = !!item.aiImage;
@@ -792,12 +825,164 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
       </div>
 
       {/* Main Pages Container */}
-      <div className="max-w-7xl mx-auto px-2 md:px-4 py-6 flex flex-col gap-10">
-        {items.map((item, index) => {
-          const isSelected = selectedIds.has(item.id);
-          const isGenerating = generatingIds.has(item.id);
-          const currentMode = viewModes[item.id] || (item.aiImage ? 'ai' : 'original');
-          const originalPhotoUrl = item.originalImage || item.image;
+      <div className="max-w-7xl mx-auto px-2 md:px-4 py-6 flex flex-col gap-10 print:gap-0 print:p-0 print:m-0 print:max-w-none print:w-full">
+        {/* Cover Page (Page 1 in PDF / Print) */}
+        {includeCoverPage && (
+          <div
+            className={`ai-preview-page w-full relative transition-all ${
+              items.filter(it => selectedIds.has(it.id)).length === 0 ? 'ai-preview-page-last' : ''
+            }`}
+          >
+            {/* Header Action Bar per Sheet (no-print) */}
+            <div className="no-print flex flex-wrap items-center justify-between bg-white px-4 py-2 rounded-t-lg border-2 border-b-0 border-gray-800 gap-2 w-full">
+              <div className="flex items-center gap-2">
+                <span className="flex items-center gap-1.5 text-xs font-bold text-gray-800">
+                  <FileText size={16} className="text-blue-600" />
+                  <span>หน้าแรก: ใบปะหน้าสรุปงานติดตั้งผ้าม่าน</span>
+                </span>
+                <span className="bg-blue-100 text-blue-800 text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 border border-blue-300">
+                  พิมพ์เป็นหน้าแรกของ PDF
+                </span>
+              </div>
+              <div className="text-xs text-gray-500 font-medium">
+                ข้อมูลทั่วไปจากหน้าแก้ไขใบงาน
+              </div>
+            </div>
+
+            <div className="ai-preview-frame w-full border-2 border-gray-800 p-2 md:p-3 rounded bg-white shadow-md flex flex-col justify-between">
+              {/* Header: Logo, Title, Customer Summary */}
+              <div className="mb-2 border-b-2 border-gray-800 pb-2 flex justify-between items-center avoid-break">
+                <div className="w-1/3 text-left flex items-center gap-2">
+                  <img
+                    src={logoSrc}
+                    alt="Logo"
+                    className="h-10 md:h-12 object-contain"
+                    style={logoSrc.startsWith('data:') ? {} : { mixBlendMode: 'multiply', filter: 'contrast(1.1) brightness(1.1)' }}
+                    referrerPolicy="no-referrer"
+                  />
+                </div>
+                <h1 className="text-lg md:text-2xl font-bold text-gray-800 w-1/3 text-center whitespace-nowrap">
+                  ใบสรุปงานติดตั้งผ้าม่าน
+                </h1>
+                <div className="w-1/3 text-right">
+                  <span className="text-xs font-bold text-gray-700 block">
+                    คุณ {generalInfo.customerName || 'ลูกค้า'}
+                  </span>
+                  <span className="text-[11px] text-gray-500">
+                    {generalInfo.confirmDate ? `คอนเฟิร์ม: ${generalInfo.confirmDate}` : ''}
+                  </span>
+                </div>
+              </div>
+
+              {/* 2-column Grid: ส่วนผู้จัดทำ & ส่วนลูกค้า */}
+              <div className="grid grid-cols-1 md:grid-cols-2 print:grid-cols-2 gap-3 mb-2 avoid-break text-sm flex-1">
+                {/* ส่วนผู้จัดทำ */}
+                <div className="p-2.5 md:p-3 border border-gray-300 rounded bg-gray-50 flex flex-col justify-between">
+                  <div>
+                    <h2 className="font-bold mb-2 border-b border-gray-300 pb-1 text-sm text-gray-800">
+                      ส่วนผู้จัดทำ
+                    </h2>
+                    <div className="space-y-1.5 text-xs">
+                      <div className="flex items-center">
+                        <span className="w-28 font-bold text-gray-700">วันที่วัดพื้นที่ :</span>
+                        <span className="flex-1 font-semibold text-gray-900 border-b border-gray-300 pb-0.5">{generalInfo.surveyDate || '-'}</span>
+                      </div>
+                      <div className="flex items-center">
+                        <span className="w-28 font-bold text-gray-700">วันที่คอนเฟิร์ม :</span>
+                        <span className="flex-1 font-semibold text-gray-900 border-b border-gray-300 pb-0.5">{generalInfo.confirmDate || '-'}</span>
+                      </div>
+                      <div className="flex flex-col">
+                        <span className="font-bold text-gray-700 mb-0.5">วันที่ติดตั้งผ้าม่าน :</span>
+                        <div className="flex flex-wrap gap-1 items-center border-b border-gray-300 pb-1">
+                          {generalInfo.installDates && generalInfo.installDates.length > 0 ? (
+                            generalInfo.installDates.map((d, i) => (
+                              <span key={i} className="bg-white px-2 py-0.5 rounded border text-xs font-bold text-blue-900 print:text-black">
+                                {d}
+                              </span>
+                            ))
+                          ) : (
+                            <span className="text-gray-400 italic text-xs">-</span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex flex-col">
+                        <span className="font-bold text-gray-700 mb-0.5">สถานที่ติดตั้ง :</span>
+                        <div className="w-full text-xs font-semibold text-gray-900 border-b border-gray-300 pb-1 whitespace-pre-wrap">
+                          {generalInfo.location || '-'}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-2 flex flex-col items-center justify-end">
+                    {generalInfo.creatorSignature && (
+                      <div className="h-8 w-full flex justify-center items-end mb-1">
+                        <img src={optImg(generalInfo.creatorSignature, 300)} className="max-h-full object-contain mix-blend-multiply" alt="signature" referrerPolicy="no-referrer" />
+                      </div>
+                    )}
+                    <div className="w-48 text-center text-xs font-bold border-b border-gray-400 pb-0.5 text-gray-900">
+                      {generalInfo.creatorName || '-'}
+                    </div>
+                    <p className="text-gray-600 text-[11px] font-bold mt-0.5">ผู้จัดทำ/เจ้าของงาน</p>
+                  </div>
+                </div>
+
+                {/* ส่วนลูกค้า */}
+                <div className="p-2.5 md:p-3 border border-gray-300 rounded bg-blue-50/30 flex flex-col justify-between">
+                  <div>
+                    <h2 className="font-bold mb-2 border-b border-gray-300 pb-1 text-sm text-gray-800">
+                      ส่วนลูกค้า
+                    </h2>
+                    <div className="space-y-1.5 text-xs">
+                      <div className="flex items-center">
+                        <span className="w-28 font-bold text-gray-700">ชื่อ-นามสกุล :</span>
+                        <span className="flex-1 font-bold text-blue-900 print:text-black border-b border-gray-300 pb-0.5">{generalInfo.customerName || '-'}</span>
+                      </div>
+                      <div className="flex items-center">
+                        <span className="w-28 font-bold text-gray-700">เบอร์ติดต่อ :</span>
+                        <span className="flex-1 font-semibold text-gray-800 border-b border-gray-300 pb-0.5">{generalInfo.customerPhone || '-'}</span>
+                      </div>
+                      <div className="flex items-center mt-2">
+                        <span className="w-28 font-bold text-gray-700">ผู้ติดต่อแทน :</span>
+                        <span className="flex-1 font-semibold text-gray-800 border-b border-gray-300 pb-0.5">{generalInfo.agentName || '-'}</span>
+                      </div>
+                      <div className="flex items-center">
+                        <span className="w-28 font-bold text-gray-700">เบอร์ติดต่อ :</span>
+                        <span className="flex-1 font-semibold text-gray-800 border-b border-gray-300 pb-0.5">{generalInfo.agentPhone || '-'}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-auto pt-3 text-center flex flex-col items-center justify-end">
+                    <p className="border-b border-gray-400 w-48 mx-auto mb-1"></p>
+                    <p className="text-gray-600 text-[11px] font-bold">ผู้สั่งซื้อ</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* หมายเหตุเงื่อนไข */}
+              <div className="bg-red-50 p-2.5 rounded border border-red-200 avoid-break">
+                <h3 className="font-bold text-red-600 print:text-gray-800 mb-0.5 text-xs underline">
+                  หมายเหตุเงื่อนไข :
+                </h3>
+                <div className="w-full text-[11px] leading-relaxed text-gray-800 whitespace-pre-wrap font-medium">
+                  {generalInfo.terms || '-'}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {(() => {
+          const selectedItemsList = items.filter(it => selectedIds.has(it.id));
+          const lastSelectedId = selectedItemsList.length > 0 ? selectedItemsList[selectedItemsList.length - 1].id : null;
+
+          return items.map((item, index) => {
+            const isSelected = selectedIds.has(item.id);
+            const isGenerating = generatingIds.has(item.id);
+            const currentMode = viewModes[item.id] || (item.aiImage ? 'ai' : 'original');
+            const originalPhotoUrl = item.originalImage || item.image;
+            const isLastItem = item.id === lastSelectedId;
 
           // Fabric / Style resolution matching image.png exactly
           const primaryArea: any = item.areas?.[0] || {};
@@ -902,7 +1087,7 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
               key={item.id}
               className={`ai-preview-page w-full relative transition-all ${
                 isSelected ? 'opacity-100' : 'opacity-60 print-hidden-unselected'
-              }`}
+              } ${isLastItem ? 'ai-preview-page-last' : ''}`}
             >
               {/* Header Action Bar per Sheet (no-print) */}
               <div className="no-print flex flex-wrap items-center justify-between bg-white px-4 py-2 rounded-t-lg border-2 border-b-0 border-gray-800 gap-2">
@@ -1012,14 +1197,14 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
                   <div className="ai-preview-left-col w-full lg:w-[70%] min-h-[400px] h-[50vh] sm:h-[60vh] lg:h-full border-b lg:border-b-0 print:border-b-0 lg:border-r print:border-r border-gray-300 flex flex-col bg-white relative z-20">
                     
                     {/* Top 70-75%: On-site window image area (AI / Original / Compare) */}
-                    <div className="flex-1 w-full border-b border-gray-300 flex flex-col relative bg-gray-900 shrink-0 overflow-hidden items-center justify-center">
+                    <div className="flex-1 w-full border-b border-gray-300 flex flex-col relative bg-white shrink-0 overflow-hidden items-center justify-center">
                       {isGenerating ? (
-                        <div className="flex flex-col items-center justify-center p-6 text-center text-white z-30">
-                          <div className="w-16 h-16 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mb-4"></div>
-                          <h4 className="text-lg font-bold flex items-center gap-2 text-indigo-300">
+                        <div className="flex flex-col items-center justify-center p-6 text-center text-gray-800 z-30">
+                          <div className="w-16 h-16 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin mb-4"></div>
+                          <h4 className="text-lg font-bold flex items-center gap-2 text-indigo-700">
                             <Sparkles className="animate-bounce" size={20} /> Gemini AI กำลังติดตั้งผ้าม่าน...
                           </h4>
-                          <p className="text-xs text-gray-300 mt-2 max-w-sm">
+                          <p className="text-xs text-gray-500 mt-2 max-w-sm">
                             กำลังคำนวณสเปก: {sMain1 || 'ผ้าม่าน'} (
                             {sMain1.includes('จีบ') ? '3 จีบ' : sMain1.includes('ลอน') ? 'Ripple Fold' : 'Custom'}
                             ) พร้อมแสงเงาและมุมกล้องของห้องจริง
@@ -1027,14 +1212,14 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
                         </div>
                       ) : currentMode === 'split' && item.aiImage && originalPhotoUrl ? (
                         /* Split Side-by-Side Mode */
-                        <div className="w-full h-full grid grid-cols-2 gap-1 p-1 bg-black">
-                          <div className="relative w-full h-full flex flex-col items-center justify-center overflow-hidden bg-gray-950">
-                            <span className="absolute top-2 left-2 bg-black/80 text-white px-2 py-0.5 rounded text-[10px] font-bold z-10 border border-gray-600">
+                        <div className="w-full h-full grid grid-cols-2 gap-1 p-1 bg-white">
+                          <div className="relative w-full h-full flex flex-col items-center justify-center overflow-hidden bg-white">
+                            <span className="absolute top-2 left-2 bg-gray-900/80 text-white px-2 py-0.5 rounded text-[10px] font-bold z-10 border border-gray-600">
                               📷 รูปหน้างานเดิม
                             </span>
                             <img src={originalPhotoUrl} alt="Original Window" className="w-full h-full object-contain" />
                           </div>
-                          <div className="relative w-full h-full flex flex-col items-center justify-center overflow-hidden bg-gray-950">
+                          <div className="relative w-full h-full flex flex-col items-center justify-center overflow-hidden bg-white">
                             <span className="absolute top-2 left-2 bg-indigo-600 text-white px-2 py-0.5 rounded text-[10px] font-bold z-10 flex items-center gap-1 shadow">
                               <Sparkles size={10} /> รูปจำลอง AI
                             </span>
@@ -1043,7 +1228,7 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
                         </div>
                       ) : currentMode === 'ai' && item.aiImage ? (
                         /* Photorealistic AI Curtain Image */
-                        <div className="relative w-full h-full flex items-center justify-center bg-black">
+                        <div className="relative w-full h-full flex items-center justify-center bg-white">
                           <img
                             src={item.aiImage}
                             alt="AI Realistic Curtain"
@@ -1056,7 +1241,7 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
                         </div>
                       ) : (
                         /* Original Photo View */
-                        <div className="relative w-full h-full flex items-center justify-center bg-gray-950">
+                        <div className="relative w-full h-full flex items-center justify-center bg-white">
                           {originalPhotoUrl ? (
                             <>
                               <img
@@ -1065,7 +1250,7 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
                                 className="w-full h-full object-contain"
                               />
                               {!item.aiImage && !isGenerating && (
-                                <div className="absolute inset-0 bg-black/40 flex flex-col items-center justify-center p-4 text-center no-print">
+                                <div className="absolute inset-0 bg-black/20 flex flex-col items-center justify-center p-4 text-center no-print">
                                   <button
                                     onClick={() => handleGenerate(item)}
                                     className="bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white px-5 py-2.5 rounded-xl font-extrabold text-sm shadow-2xl flex items-center gap-2 transform hover:scale-105 transition-all border border-indigo-300/30"
@@ -1073,7 +1258,7 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
                                     <Sparkles size={18} className="text-yellow-300 animate-spin" />
                                     <span>กดสร้างภาพผ้าม่านด้วย AI สำหรับบานนี้</span>
                                   </button>
-                                  <p className="text-xs text-indigo-100 mt-2 font-medium">
+                                  <p className="text-xs text-white drop-shadow mt-2 font-medium">
                                     AI จะคำนวณรูปแบบ {sMain1 || 'ผ้าม่าน'} ตามขนาดและสเปกของบานนี้โดยอัตโนมัติ
                                   </p>
                                 </div>
@@ -1081,9 +1266,9 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
                             </>
                           ) : (
                             <div className="text-center text-gray-400 p-6 flex flex-col items-center">
-                              <ImageIcon size={48} className="text-gray-600 mb-2" />
-                              <span className="font-bold text-sm">ยังไม่มีรูปภาพหน้างาน</span>
-                              <span className="text-xs text-gray-500 mt-1">
+                              <ImageIcon size={48} className="text-gray-300 mb-2" />
+                              <span className="font-bold text-sm text-gray-500">ยังไม่มีรูปภาพหน้างาน</span>
+                              <span className="text-xs text-gray-400 mt-1">
                                 กรุณาเพิ่มรูปหน้างานในหน้าแก้ไขใบงานก่อน
                               </span>
                             </div>
@@ -1143,7 +1328,7 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
                       </div>
                     </div>
 
-                    <div className="p-3 print:p-2 flex flex-col justify-between gap-4 print:gap-1.5 h-full flex-1 overflow-hidden">
+                    <div className="p-3 print:p-2 flex flex-col justify-between gap-4 print:gap-1.5 h-full flex-1 overflow-y-auto print:overflow-hidden">
                       
                       {/* รูปแบบและขนาดม่าน */}
                       <div className="w-full">
@@ -1180,19 +1365,8 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
                         <span className="font-bold text-gray-900 text-[14px] border-b border-gray-300 pb-1 mb-1">
                           รางม่าน
                         </span>
-                        <div className="flex flex-wrap gap-1.5 mt-1">
-                          {item.tracks && item.tracks.length > 0 ? (
-                            item.tracks.map(tStr => (
-                              <span
-                                key={tStr}
-                                className="bg-gray-100 px-2.5 py-0.5 rounded border border-gray-300 text-[12px] font-bold text-gray-800 shadow-sm"
-                              >
-                                {tStr}
-                              </span>
-                            ))
-                          ) : (
-                            <span className="text-gray-400 italic text-xs">-</span>
-                          )}
+                        <div className="text-[13px] font-bold text-gray-800 mt-0.5">
+                          {item.tracks && item.tracks.length > 0 ? item.tracks.join(', ') : '-'}
                         </div>
                       </div>
 
@@ -1221,19 +1395,8 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
                         <span className="font-bold text-gray-900 text-[14px] border-b border-gray-300 pb-1 mb-1">
                           อุปกรณ์เสริม
                         </span>
-                        <div className="flex flex-wrap gap-1.5 mt-1">
-                          {item.accessories && item.accessories.length > 0 ? (
-                            item.accessories.map(tStr => (
-                              <span
-                                key={tStr}
-                                className="bg-gray-100 px-2.5 py-0.5 rounded border border-gray-300 text-[12px] font-bold text-gray-800 shadow-sm"
-                              >
-                                {tStr}
-                              </span>
-                            ))
-                          ) : (
-                            <span className="text-gray-400 italic text-xs">-</span>
-                          )}
+                        <div className="text-[13px] font-bold text-gray-800 mt-0.5">
+                          {item.accessories && item.accessories.length > 0 ? item.accessories.join(', ') : '-'}
                         </div>
                       </div>
 
@@ -1343,7 +1506,8 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
               )}
             </div>
           );
-        })}
+        });
+      })()}
       </div>
 
       {/* Admin Monthly Quota Configuration Modal */}

@@ -799,6 +799,7 @@ const App: React.FC = () => {
         saveStatus={saveStatus}
         onSharePDF={handleSharePDF}
         onPrint={printDocument}
+        logoSrc={logoSrc}
       />
     );
   }
@@ -863,9 +864,14 @@ const App: React.FC = () => {
             position: relative !important;
             overflow: hidden !important;
           }
-          .print-center-page:last-child {
-            page-break-after: auto !important;
-            break-after: auto !important;
+          .print-center-page:last-child,
+          .print-center-page-last {
+            page-break-after: avoid !important;
+            break-after: avoid !important;
+          }
+
+          .space-y-10 > :not([hidden]) ~ :not([hidden]) {
+            margin-top: 0 !important;
           }
 
           /* Outer Frame: exactly 186mm uniform height on EVERY page, centered on 190mm page */
@@ -1047,51 +1053,55 @@ const App: React.FC = () => {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6 mb-4 avoid-break text-sm relative z-0">
-              <div className="p-4 border border-gray-300 rounded-md bg-gray-50">
-                <h2 className="font-bold mb-3 border-b border-gray-300 pb-1 inline-block text-base text-gray-800">ส่วนผู้จัดทำ</h2>
-                <div className="space-y-2.5 text-xs">
-                  <div className="flex items-center"><span className="w-36 font-bold text-gray-700">วันที่วัดพื้นที่ :</span><input type="date" name="surveyDate" value={generalInfo.surveyDate} onChange={handleGeneralChange} className="flex-1 border-b border-gray-300 outline-none focus:border-blue-500 px-1 bg-transparent h-7" /></div>
-                  <div className="flex items-center"><span className="w-36 font-bold text-gray-700">วันที่คอนเฟิร์ม :</span><input type="date" name="confirmDate" value={generalInfo.confirmDate} onChange={handleGeneralChange} className="flex-1 border-b border-gray-300 outline-none focus:border-blue-500 px-1 bg-transparent h-7" /></div>
-                  <div className="flex flex-col"><span className="font-bold mb-1 text-gray-700">วันที่ติดตั้งผ้าม่าน :</span>
-                    <div className="flex flex-wrap gap-1.5 items-center min-h-[28px] border-b border-gray-300 pb-1">
-                      {generalInfo.installDates.length > 0 ? generalInfo.installDates.map((d, i) => (<span key={i} className="bg-white px-2 py-0.5 rounded border shadow-sm flex items-center font-bold text-blue-800 print:text-black">{d} <span className="mx-1 print-hidden no-print font-normal text-gray-400">/</span><X size={12} className="ml-1 cursor-pointer text-red-500 no-print hover:bg-red-100 rounded-full" onClick={() => removeInstallDate(d)}/></span>)) : <span className="text-gray-400 italic no-print text-[11px]">ยังไม่ได้ระบุ</span>}
-                      <div className="flex items-center ml-auto no-print"><input type="date" value={tempInstallDate} onChange={(e)=>setTempInstallDate(e.target.value)} className="border rounded px-2 py-1 text-xs outline-none focus:border-blue-500 bg-white h-7"/><button onClick={addInstallDate} className="bg-blue-100 text-blue-700 p-1.5 rounded ml-1 hover:bg-blue-200 transition-colors h-7 w-7 flex items-center justify-center font-bold text-sm">+</button></div>
+            <div className="grid grid-cols-1 md:grid-cols-2 print:grid-cols-2 gap-4 md:gap-6 print:gap-4 mb-4 print:mb-2 avoid-break text-sm relative z-0">
+              <div className="p-4 print:p-3 border border-gray-300 rounded-md bg-gray-50 flex flex-col justify-between">
+                <div>
+                  <h2 className="font-bold mb-3 print:mb-2 border-b border-gray-300 pb-1 inline-block text-base text-gray-800">ส่วนผู้จัดทำ</h2>
+                  <div className="space-y-2.5 print:space-y-1.5 text-xs">
+                    <div className="flex items-center"><span className="w-36 font-bold text-gray-700">วันที่วัดพื้นที่ :</span><input type="date" name="surveyDate" value={generalInfo.surveyDate} onChange={handleGeneralChange} className="flex-1 border-b border-gray-300 outline-none focus:border-blue-500 px-1 bg-transparent h-7 print:h-5 print:font-semibold" /></div>
+                    <div className="flex items-center"><span className="w-36 font-bold text-gray-700">วันที่คอนเฟิร์ม :</span><input type="date" name="confirmDate" value={generalInfo.confirmDate} onChange={handleGeneralChange} className="flex-1 border-b border-gray-300 outline-none focus:border-blue-500 px-1 bg-transparent h-7 print:h-5 print:font-semibold" /></div>
+                    <div className="flex flex-col"><span className="font-bold mb-1 text-gray-700">วันที่ติดตั้งผ้าม่าน :</span>
+                      <div className="flex flex-wrap gap-1.5 items-center min-h-[28px] print:min-h-[22px] border-b border-gray-300 pb-1">
+                        {generalInfo.installDates.length > 0 ? generalInfo.installDates.map((d, i) => (<span key={i} className="bg-white px-2 py-0.5 rounded border shadow-sm flex items-center font-bold text-blue-800 print:text-black">{d} <span className="mx-1 print-hidden no-print font-normal text-gray-400">/</span><X size={12} className="ml-1 cursor-pointer text-red-500 no-print hover:bg-red-100 rounded-full" onClick={() => removeInstallDate(d)}/></span>)) : <span className="text-gray-400 italic no-print text-[11px]">ยังไม่ได้ระบุ</span>}
+                        <div className="flex items-center ml-auto no-print"><input type="date" value={tempInstallDate} onChange={(e)=>setTempInstallDate(e.target.value)} className="border rounded px-2 py-1 text-xs outline-none focus:border-blue-500 bg-white h-7"/><button onClick={addInstallDate} className="bg-blue-100 text-blue-700 p-1.5 rounded ml-1 hover:bg-blue-200 transition-colors h-7 w-7 flex items-center justify-center font-bold text-sm">+</button></div>
+                      </div>
                     </div>
+                    <div className="flex flex-col"><span className="font-bold text-gray-700">สถานที่ติดตั้ง :</span><textarea name="location" value={generalInfo.location} onChange={handleGeneralChange} rows={2} className="w-full border border-gray-300 rounded p-2 mt-1 outline-none focus:border-blue-500 print-hidden resize-none bg-white text-xs font-medium"></textarea><div className="hidden print-block w-full mt-1 text-[14px] font-bold whitespace-pre-wrap text-black border-b border-gray-300 pb-1">{generalInfo.location || '-'}</div></div>
                   </div>
-                  <div className="flex flex-col"><span className="font-bold text-gray-700">สถานที่ติดตั้ง :</span><textarea name="location" value={generalInfo.location} onChange={handleGeneralChange} rows={2} className="w-full border border-gray-300 rounded p-2 mt-1 outline-none focus:border-blue-500 print-hidden resize-none bg-white text-xs font-medium"></textarea><div className="hidden print-block w-full mt-1 text-[15px] font-bold whitespace-pre-wrap text-black border-b border-gray-300 pb-1">{generalInfo.location || '-'}</div></div>
                 </div>
-                <div className="mt-8 flex flex-col items-center justify-end relative h-24">
-                  {generalInfo.creatorSignature && <div className="h-12 w-full flex justify-center items-end mb-1"><img src={optImg(generalInfo.creatorSignature, 300)} className="max-h-full object-contain mix-blend-multiply" alt="signature" referrerPolicy="no-referrer" /></div>}
+                <div className="mt-6 print:mt-4 flex flex-col items-center justify-end relative h-22 print:h-20">
+                  {generalInfo.creatorSignature && <div className="h-10 print:h-8 w-full flex justify-center items-end mb-1"><img src={optImg(generalInfo.creatorSignature, 300)} className="max-h-full object-contain mix-blend-multiply" alt="signature" referrerPolicy="no-referrer" /></div>}
                   {appUser.role === 'admin' ? (
                     <select value={generalInfo.creatorName || ''} onChange={handleCreatorChange} className="border-b border-gray-400 w-48 text-center text-[15px] font-bold text-blue-800 outline-none appearance-none bg-transparent cursor-pointer print-hidden relative z-10 pb-0.5 h-8">
                       <option value="">- ระบุผู้จัดทำ -</option>{allAccounts.map(a => <option key={a.id} value={a.name || a.username}>{a.name || a.username}</option>)}
                     </select>
                   ) : <div className="border-b border-gray-400 w-48 text-center text-[15px] font-bold text-blue-800 print-hidden relative z-10 pb-0.5">{displayCreatorName}</div>}
                   <div className="hidden print-block w-48 text-center text-[15px] font-bold border-b border-gray-400 pb-0.5 text-black relative z-10">{displayCreatorName}</div>
-                  <p className="text-gray-600 text-sm font-bold mt-1">ผู้จัดทำ/เจ้าของงาน</p>
+                  <p className="text-gray-600 text-xs font-bold mt-1">ผู้จัดทำ/เจ้าของงาน</p>
                 </div>
               </div>
 
-              <div className="p-4 border border-gray-300 rounded-md bg-blue-50/30 flex flex-col">
-                <h2 className="font-bold mb-3 border-b border-gray-300 pb-1 inline-block text-base text-gray-800">ส่วนลูกค้า</h2>
-                <div className="space-y-2.5">
-                  <div className="flex items-center"><span className="w-32 font-bold text-gray-700">ชื่อ-นามสกุล :</span><input type="text" name="customerName" value={generalInfo.customerName} onChange={handleGeneralChange} className="flex-1 border-b border-gray-300 outline-none focus:border-blue-500 px-1 font-bold text-blue-800 text-[15px] print:text-black bg-transparent h-7" /></div>
-                  <div className="flex items-center"><span className="w-32 font-bold text-gray-700">เบอร์ติดต่อ :</span><input type="text" name="customerPhone" value={generalInfo.customerPhone} onChange={handleGeneralChange} className="flex-1 border-b border-gray-300 outline-none focus:border-blue-500 px-1 font-medium bg-transparent h-7" /></div>
-                  <div className="flex items-center mt-4"><span className="w-32 font-bold text-gray-700">ผู้ติดต่อแทน :</span><input type="text" name="agentName" value={generalInfo.agentName} onChange={handleGeneralChange} className="flex-1 border-b border-gray-300 outline-none focus:border-blue-500 px-1 font-medium bg-transparent h-7" /></div>
-                  <div className="flex items-center"><span className="w-32 font-bold text-gray-700">เบอร์ติดต่อ :</span><input type="text" name="agentPhone" value={generalInfo.agentPhone} onChange={handleGeneralChange} className="flex-1 border-b border-gray-300 outline-none focus:border-blue-500 px-1 font-medium bg-transparent h-7" /></div>
+              <div className="p-4 print:p-3 border border-gray-300 rounded-md bg-blue-50/30 flex flex-col justify-between">
+                <div>
+                  <h2 className="font-bold mb-3 print:mb-2 border-b border-gray-300 pb-1 inline-block text-base text-gray-800">ส่วนลูกค้า</h2>
+                  <div className="space-y-2.5 print:space-y-1.5">
+                    <div className="flex items-center"><span className="w-32 font-bold text-gray-700">ชื่อ-นามสกุล :</span><input type="text" name="customerName" value={generalInfo.customerName} onChange={handleGeneralChange} className="flex-1 border-b border-gray-300 outline-none focus:border-blue-500 px-1 font-bold text-blue-800 text-[15px] print:text-black bg-transparent h-7 print:h-5" /></div>
+                    <div className="flex items-center"><span className="w-32 font-bold text-gray-700">เบอร์ติดต่อ :</span><input type="text" name="customerPhone" value={generalInfo.customerPhone} onChange={handleGeneralChange} className="flex-1 border-b border-gray-300 outline-none focus:border-blue-500 px-1 font-medium bg-transparent h-7 print:h-5 print:font-semibold text-gray-800" /></div>
+                    <div className="flex items-center mt-4 print:mt-2"><span className="w-32 font-bold text-gray-700">ผู้ติดต่อแทน :</span><input type="text" name="agentName" value={generalInfo.agentName} onChange={handleGeneralChange} className="flex-1 border-b border-gray-300 outline-none focus:border-blue-500 px-1 font-medium bg-transparent h-7 print:h-5 print:font-semibold text-gray-800" /></div>
+                    <div className="flex items-center"><span className="w-32 font-bold text-gray-700">เบอร์ติดต่อ :</span><input type="text" name="agentPhone" value={generalInfo.agentPhone} onChange={handleGeneralChange} className="flex-1 border-b border-gray-300 outline-none focus:border-blue-500 px-1 font-medium bg-transparent h-7 print:h-5 print:font-semibold text-gray-800" /></div>
+                  </div>
                 </div>
-                <div className="mt-auto pt-8 text-center flex flex-col items-center justify-end h-24">
+                <div className="mt-auto pt-6 print:pt-4 text-center flex flex-col items-center justify-end h-22 print:h-20">
                   <p className="border-b border-gray-400 w-48 mx-auto mb-1"></p>
-                  <p className="text-gray-600 text-sm font-bold">ผู้สั่งซื้อ</p>
+                  <p className="text-gray-600 text-xs font-bold">ผู้สั่งซื้อ</p>
                 </div>
               </div>
             </div>
 
-            <div className="mb-6 avoid-break bg-red-50 p-3 rounded border border-red-200 relative z-0">
-              <h3 className="font-bold text-red-600 print:text-gray-800 mb-2 text-sm print:text-[15px] underline">หมายเหตุเงื่อนไข :</h3>
+            <div className="mb-6 print:mb-0 avoid-break bg-red-50 p-3 print:p-2.5 rounded border border-red-200 relative z-0">
+              <h3 className="font-bold text-red-600 print:text-gray-800 mb-2 print:mb-1 text-sm print:text-[14px] underline">หมายเหตุเงื่อนไข :</h3>
               <textarea name="terms" value={generalInfo.terms} onChange={handleGeneralChange} rows={5} className="w-full text-xs bg-transparent outline-none print-hidden text-gray-700 leading-tight resize-none"></textarea>
-              <div className="hidden print-block w-full text-[13px] text-gray-800 leading-relaxed whitespace-pre-wrap font-medium">{generalInfo.terms}</div>
+              <div className="hidden print-block w-full text-[13px] print:text-[11.5px] print:leading-relaxed text-gray-800 whitespace-pre-wrap font-medium">{generalInfo.terms}</div>
             </div>
           </div>
         </div>
@@ -1216,8 +1226,10 @@ const App: React.FC = () => {
               }
             }
 
+            const isLastItem = index === items.length - 1;
+
             return (
-              <div key={item.id} className="print-center-page w-full relative mb-10 print:mb-0">
+              <div key={item.id} className={`print-center-page w-full relative mb-10 print:mb-0 ${isLastItem ? 'print-center-page-last' : ''}`}>
                 <div className="print-content-wrapper print-item-frame w-full border-2 border-gray-800 p-1 relative rounded bg-white hover:z-50 transition-all duration-300 shadow-sm hover:shadow-md">
                   <div className="absolute top-0 left-0 bg-gray-800 text-white px-4 py-1.5 text-sm font-bold z-10 rounded-br flex items-center gap-2 no-print">
                     <span>รายการที่ {index + 1}</span>
@@ -1273,7 +1285,7 @@ const App: React.FC = () => {
                         <div className="hidden print-block w-full text-[15px] font-bold leading-tight text-black whitespace-pre-wrap border-b border-gray-800 pb-2 mb-1">{item.roomPos || '-'}</div>
                       </div>
                       
-                      <div className="p-3 print:p-2 flex flex-col justify-between gap-4 print:gap-1.5 h-full flex-1 overflow-hidden">
+                      <div className="p-3 print:p-2 flex flex-col justify-start lg:justify-between gap-4 print:gap-1.5 flex-1 overflow-y-auto print:overflow-hidden">
                         <div className="border border-gray-300 p-2 rounded bg-gray-50 no-print">
                           <div className="flex justify-between items-center mb-2 border-b border-gray-300 pb-1">
                             <span className="font-bold text-gray-800 text-[14px]">รายละเอียดวัสดุ/ผ้า</span>
@@ -1345,13 +1357,20 @@ const App: React.FC = () => {
 
                           <div className="flex flex-col mt-1">
                             <span className="font-bold text-gray-800 text-[14px] border-b border-gray-300 pb-1 mb-1">รางม่าน</span>
-                            <div className="flex flex-wrap gap-1.5 mt-1">
-                              {item.tracks?.map(tStr => <span key={tStr} className="bg-gray-100 px-2 py-0.5 rounded border border-gray-300 text-[12px] flex items-center shadow-sm font-bold text-gray-800">{tStr} <X size={10} className="ml-1 cursor-pointer text-red-500 no-print" onClick={()=>handleMultiSelect(item.id, 'tracks', tStr)}/></span>)}
-                              <select className="w-full border-b border-gray-300 outline-none no-print mt-1 text-[11px] text-gray-500 font-medium bg-transparent h-7" onChange={(e) => {if(e.target.value) handleMultiSelect(item.id, 'tracks', e.target.value); e.target.value='';}}><option value="">+ เลือกชนิดรางม่าน</option>{(appDB.tracks || []).map((s: string)=><option key={s} value={s}>{s}</option>)}</select>
-                              <div className="flex w-full gap-1 mt-1 no-print">
+                            {/* On-screen chips */}
+                            <div className="no-print">
+                              <div className="flex flex-wrap gap-1.5 mt-1">
+                                {item.tracks?.map(tStr => <span key={tStr} className="bg-gray-100 px-2 py-0.5 rounded border border-gray-300 text-[12px] flex items-center shadow-sm font-bold text-gray-800">{tStr} <X size={10} className="ml-1 cursor-pointer text-red-500" onClick={()=>handleMultiSelect(item.id, 'tracks', tStr)}/></span>)}
+                              </div>
+                              <select className="w-full border-b border-gray-300 outline-none mt-1 text-[11px] text-gray-500 font-medium bg-transparent h-7" onChange={(e) => {if(e.target.value) handleMultiSelect(item.id, 'tracks', e.target.value); e.target.value='';}}><option value="">+ เลือกชนิดรางม่าน</option>{(appDB.tracks || []).map((s: string)=><option key={s} value={s}>{s}</option>)}</select>
+                              <div className="flex w-full gap-1 mt-1">
                                  <input type="text" id={`customTrack-${item.id}`} placeholder="หรือพิมพ์ระบุเอง..." className="flex-1 border border-gray-200 rounded px-2 py-1 outline-none text-[11px] bg-white shadow-sm focus:border-blue-400 h-7" onKeyDown={(e: any) => { if(e.key === 'Enter' && e.target.value.trim()) { handleMultiSelect(item.id, 'tracks', e.target.value.trim()); e.target.value=''; } }} />
                                  <button onClick={() => { const inp = document.getElementById(`customTrack-${item.id}`) as HTMLInputElement; if(inp && inp.value.trim()) { handleMultiSelect(item.id, 'tracks', inp.value.trim()); inp.value=''; } }} className="bg-blue-50 hover:bg-blue-100 text-blue-600 border border-blue-200 px-2 py-1 rounded text-[11px] font-bold shadow-sm transition-colors h-7 w-7 flex items-center justify-center">+</button>
                               </div>
+                            </div>
+                            {/* In print: plain text without border or background, separated by comma */}
+                            <div className="hidden print-block text-[13px] font-bold text-gray-800 mt-0.5 whitespace-pre-wrap">
+                              {item.tracks && item.tracks.length > 0 ? item.tracks.join(', ') : '-'}
                             </div>
                           </div>
 
@@ -1362,13 +1381,20 @@ const App: React.FC = () => {
 
                           <div className="flex flex-col mt-1">
                             <span className="font-bold text-gray-800 text-[14px] border-b border-gray-300 pb-1 mb-1">อุปกรณ์เสริม</span>
-                            <div className="flex flex-wrap gap-1.5 mt-1">
-                              {item.accessories?.map(tStr => <span key={tStr} className="bg-gray-100 px-2 py-0.5 rounded border border-gray-300 text-[12px] flex items-center shadow-sm font-bold text-gray-800">{tStr} <X size={10} className="ml-1 cursor-pointer text-red-500 no-print" onClick={()=>handleMultiSelect(item.id, 'accessories', tStr)}/></span>)}
-                              <select className="w-full border-b border-gray-300 outline-none no-print mt-1 text-[11px] text-gray-500 font-medium bg-transparent h-7" onChange={(e) => {if(e.target.value) handleMultiSelect(item.id, 'accessories', e.target.value); e.target.value='';}}><option value="">+ เลือกอุปกรณ์เสริม</option>{(appDB.accessories || []).map((s: string)=><option key={s} value={s}>{s}</option>)}</select>
-                              <div className="flex w-full gap-1 mt-1 no-print">
+                            {/* On-screen chips */}
+                            <div className="no-print">
+                              <div className="flex flex-wrap gap-1.5 mt-1">
+                                {item.accessories?.map(tStr => <span key={tStr} className="bg-gray-100 px-2 py-0.5 rounded border border-gray-300 text-[12px] flex items-center shadow-sm font-bold text-gray-800">{tStr} <X size={10} className="ml-1 cursor-pointer text-red-500" onClick={()=>handleMultiSelect(item.id, 'accessories', tStr)}/></span>)}
+                              </div>
+                              <select className="w-full border-b border-gray-300 outline-none mt-1 text-[11px] text-gray-500 font-medium bg-transparent h-7" onChange={(e) => {if(e.target.value) handleMultiSelect(item.id, 'accessories', e.target.value); e.target.value='';}}><option value="">+ เลือกอุปกรณ์เสริม</option>{(appDB.accessories || []).map((s: string)=><option key={s} value={s}>{s}</option>)}</select>
+                              <div className="flex w-full gap-1 mt-1">
                                  <input type="text" id={`customAcc-${item.id}`} placeholder="หรือพิมพ์ระบุเอง..." className="flex-1 border border-gray-200 rounded px-2 py-1 outline-none text-[11px] bg-white shadow-sm focus:border-blue-400 h-7" onKeyDown={(e: any) => { if(e.key === 'Enter' && e.target.value.trim()) { handleMultiSelect(item.id, 'accessories', e.target.value.trim()); e.target.value=''; } }} />
                                  <button onClick={() => { const inp = document.getElementById(`customAcc-${item.id}`) as HTMLInputElement; if(inp && inp.value.trim()) { handleMultiSelect(item.id, 'accessories', inp.value.trim()); inp.value=''; } }} className="bg-blue-50 hover:bg-blue-100 text-blue-600 border border-blue-200 px-2 py-1 rounded text-[11px] font-bold shadow-sm transition-colors h-7 w-7 flex items-center justify-center">+</button>
                               </div>
+                            </div>
+                            {/* In print: plain text without border or background, separated by comma */}
+                            <div className="hidden print-block text-[13px] font-bold text-gray-800 mt-0.5 whitespace-pre-wrap">
+                              {item.accessories && item.accessories.length > 0 ? item.accessories.join(', ') : '-'}
                             </div>
                           </div>
                         </div>
