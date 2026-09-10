@@ -1,0 +1,8 @@
+{
+  "name": "Remix ใบสรุปงานติดตั้งผ้าม่าน",
+  "description": "ระบบจัดการและจัดทำใบสรุปงานติดตั้งผ้าม่านสำหรับพนักงานและผู้ดูแลระบบ",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

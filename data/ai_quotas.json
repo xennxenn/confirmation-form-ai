@@ -1,0 +1,11 @@
+{
+  "defaultMonthlyLimit": 20,
+  "monthlyLimits": {
+    "testuser": 30
+  },
+  "usage": {
+    "2026-09": {
+      "anonymous": 1
+    }
+  }
+}
