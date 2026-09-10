@@ -15,6 +15,7 @@ export interface CurtainAreaSpec {
   fabrics?: any[];
   styleMain1?: string;
   styleAction1?: string;
+  points?: { x: number; y: number }[];
 }
 
 export interface CurtainPromptSpecs {
@@ -49,9 +50,12 @@ export interface CurtainPromptSpecs {
     minY: number;
     maxY: number;
   } | null;
+  polygonPoints?: { x: number; y: number }[];
+  isBayOrCorner?: boolean;
   areas?: CurtainAreaSpec[];
   hasSwatch1?: boolean;
   hasSwatch2?: boolean;
+  hasGuideImage?: boolean;
 }
 
 /**
@@ -271,8 +275,10 @@ export function buildCurtainAiPrompt(specs: CurtainPromptSpecs): string {
 
   // Opening actions
   const a1 = (specs.action1 || '').trim();
-  const isA1OneWay = a1.includes('ข้าง') || a1.includes('ทางเดียว') || a1.includes('ซ้าย') || a1.includes('ขวา') || a1.includes('1 ผืน') || a1.includes('ด้านเดียว');
+  const isA1OneWayLeft = a1.includes('ซ้าย') && !a1.includes('กลาง');
+  const isA1OneWayRight = a1.includes('ขวา') && !a1.includes('กลาง');
   const isA1Split = a1.includes('กลาง') || a1.includes('แยก') || a1.includes('2 ผืน');
+  const isA1OneWay = isA1OneWayLeft || isA1OneWayRight || a1.includes('ข้าง') || a1.includes('ทางเดียว') || a1.includes('1 ผืน') || a1.includes('ด้านเดียว');
 
   let action1En = 'standard full coverage';
   if (isBlindOrShade) {
@@ -282,11 +288,13 @@ export function buildCurtainAiPrompt(specs: CurtainPromptSpecs): string {
       action1En = 'neatly lowered window blind providing uniform coverage';
     }
   } else {
-    action1En = isA1OneWay
-      ? 'one-way draw to one side (single drapery panel)'
-      : isA1Split
-        ? 'center split parting symmetrically to both left and right sides (two panels)'
-        : 'standard full-coverage draw';
+    action1En = isA1OneWayLeft
+      ? 'one-way draw to the left side (single drapery panel gathered on the left, right side open)'
+      : isA1OneWayRight
+        ? 'one-way draw to the right side (single drapery panel gathered on the right, left side open)'
+        : isA1Split
+          ? 'center split parting symmetrically to both left and right sides (two panels)'
+          : 'standard full-coverage draw';
   }
 
   const a2 = (specs.action2 || specs.action1 || '').trim();
@@ -294,6 +302,24 @@ export function buildCurtainAiPrompt(specs: CurtainPromptSpecs): string {
   const action2En = isA2OneWay
     ? 'one-way draw to side'
     : 'center split parting to both sides';
+
+  // Detect Bay Window, Corner Window, or Alcove (แบบโค้งหรือแบบตรงตามที่พื้นที่ผ้าม่านและสเปกกำหนด)
+  // NEVER assume a 4-point straight window is a bay/curved window!
+  const isBay = (() => {
+    if (specs.isBayOrCorner) return true;
+    const room = (specs.roomPos || '').toLowerCase();
+    const track = (specs.track || '').toLowerCase();
+
+    // Explicit curved track
+    const explicitCurvedTrack = track.includes('โค้ง') || track.includes('ดัด') || track.includes('curve');
+    if (explicitCurvedTrack) return true;
+
+    // Explicit bay / corner room name AND polygon with >= 5 vertices tracing the walls
+    const explicitBayRoom = room.includes('เบย์') || room.includes('bay') || room.includes('เข้ามุม') || room.includes('หักมุม') || room.includes('โค้ง');
+    if (explicitBayRoom && specs.polygonPoints && specs.polygonPoints.length >= 5) return true;
+
+    return false;
+  })();
 
   // Panel & Blind Quantity configuration
   const numAreas = (specs.areas && specs.areas.length > 0) ? specs.areas.length : 1;
@@ -346,18 +372,102 @@ BLIND CONFIGURATION (VENETIAN BLINDS):
 - EXACTLY ONE SINGLE continuous blind unit (มู่ลี่ 1 ชุด เต็มความกว้างบาน).
 - DO NOT split into multiple blinds!
 `;
+    } else if (isA1OneWayLeft) {
+      panelConfigText = `
+======================================================================
+PANEL CONFIGURATION: ONE-WAY DRAW TO THE LEFT (รวบซ้าย - ผ้าม่าน 1 ผืนเก็บซ้าย)
+======================================================================
+1. EXACTLY ONE (1) OPAQUE CURTAIN PANEL IN TOTAL (ผ้าม่านทึบ 1 ผืนเท่านั้น):
+   - The curtain is a single panel gathered and stacked ONLY ON THE LEFT SIDE of the opening, within the left ~20-30% of the designated boundary.
+   - It hangs neatly from the top track down to the bottom boundary.
+2. RIGHT SIDE AND CENTER REMAIN COMPLETELY OPEN (ด้านขวาและตรงกลางเปิดโล่ง):
+   - ABSOLUTELY NO OPAQUE CURTAIN ON THE RIGHT SIDE! ZERO drapery on the right half.
+   - The right side and walkway/doorway must remain completely clear, unobstructed, and see-through.
+   - DO NOT place a curtain stack on the right side!
+${is2Layers ? `
+3. DUAL-LAYER / 2-LAYER OPERATION (ระบบม่าน 2 ชั้น):
+   - Layer 1 (Main Opaque): Gathered and stacked on the LEFT side only (รวบซ้าย 1 ผืน).
+   - Layer 2 (Sheer Underlayer): White translucent sheer curtain. If sheer action is also "รวบซ้าย", the sheer is also gathered on the left side with the main curtain. If drawn across the glass, it provides a soft sheer filter while the main curtain remains stacked on the left.
+` : ''}
+4. STRICT BOUNDARY RESTRICTION (ผ้าม่านต้องอยู่ในกรอบพื้นที่ผ้าม่านไม่ขาด ไม่เกิน):
+   - The curtain must stay strictly within the designated boundary frame.
+   - DO NOT spill over onto the adjacent left wall molding! Keep it inside the opening frame.
+======================================================================
+`;
+    } else if (isA1OneWayRight) {
+      panelConfigText = `
+======================================================================
+PANEL CONFIGURATION: ONE-WAY DRAW TO THE RIGHT (รวบขวา - ผ้าม่าน 1 ผืนเก็บขวา)
+======================================================================
+1. EXACTLY ONE (1) OPAQUE CURTAIN PANEL IN TOTAL (ผ้าม่านทึบ 1 ผืนเท่านั้น):
+   - The curtain is a single panel gathered and stacked ONLY ON THE RIGHT SIDE of the opening, within the right ~20-30% of the designated boundary.
+   - It hangs neatly from the top track down to the bottom boundary.
+2. LEFT SIDE AND CENTER REMAIN COMPLETELY OPEN (ด้านซ้ายและตรงกลางเปิดโล่ง):
+   - ABSOLUTELY NO OPAQUE CURTAIN ON THE LEFT SIDE! ZERO drapery on the left half.
+   - The left side and walkway/doorway must remain completely clear, unobstructed, and see-through.
+   - DO NOT place a curtain stack on the left side!
+${is2Layers ? `
+3. DUAL-LAYER / 2-LAYER OPERATION (ระบบม่าน 2 ชั้น):
+   - Layer 1 (Main Opaque): Gathered and stacked on the RIGHT side only (รวบขวา 1 ผืน).
+   - Layer 2 (Sheer Underlayer): White translucent sheer curtain.
+` : ''}
+4. STRICT BOUNDARY RESTRICTION (ผ้าม่านต้องอยู่ในกรอบพื้นที่ผ้าม่านไม่ขาด ไม่เกิน):
+   - The curtain must stay strictly within the designated boundary frame.
+   - DO NOT spill over onto the adjacent right wall! Keep it inside the opening frame.
+======================================================================
+`;
+    } else if (isA1Split) {
+      if (isBay) {
+        panelConfigText = `
+======================================================================
+STRICT MANDATE: ONE SINGLE CONTINUOUS CURVED TRACK WITH CENTER-SPLIT DRAPERY
+(ผ้าม่านชุดเดียวบนรางดัดโค้งต่อเนื่อง 1 ชุด - รวบแยกกลางซ้ายขวา ห้ามแบ่งเป็น 3 บานเด็ดขาด!)
+======================================================================
+1. TOTAL NUMBER OF CURTAIN UNITS:
+   - This installation is EXACTLY ONE (1) CONTINUOUS CURTAIN SET on a continuous curved/bay ceiling track (รางดัดโค้ง 1 ชุดต่อเนื่อง บานที่ 1).
+   - ABSOLUTELY DO NOT SPLIT THIS ALCOVE INTO 3 SEPARATE WINDOW BLINDS OR 3 SEPARATE CURTAIN PAIRS!
+   - Generating 3 separate sets of curtains across the walls is a FATAL DEFECT.
+   - Do NOT treat each window pane as a separate curtain.
+
+2. DRAPERY DRAW ACTION & STACK POSITIONS (เปิดแยกกลาง - รวบไปเก็บที่ผนังซ้ายสุดและขวาสุดเท่านั้น):
+   - The main opaque drapery operates as a center-split pair (2 panels total) on this continuous curved track:
+     * LEFT PANEL (รวบซ้าย): The entire left half of the curtain is drawn open and stacked neatly against the FAR LEFT WALL (ผนังซ้ายสุด).
+     * RIGHT PANEL (รวบขวา): The entire right half of the curtain is drawn open and stacked neatly against the FAR RIGHT WALL (ผนังขวาสุด).
+     * REAR CENTER WINDOW & INNER CORNERS: MUST BE COMPLETELY CLEAR OF OPAQUE DRAPERY!
+     * ABSOLUTELY DO NOT HANG HEAVY CURTAINS IN THE TWO INNER CORNERS!
+     * ABSOLUTELY DO NOT HANG HEAVY CURTAINS IN THE REAR CENTER WINDOW!
+     * The center window view must remain OPEN, unobstructed, and clear!
+     ${is2Layers ? `* If Sheer Underlayer is present (Layer 2 / ผ้าโปร่ง): A soft translucent white sheer curtain hangs along the track across the windows, while the main opaque curtains are stacked ONLY on the far left wall and far right wall.` : ''}
+
+3. TOTAL VISIBLE OPAQUE PANELS:
+   - EXACTLY TWO (2) OPAQUE CURTAIN PANELS IN TOTAL in the entire room:
+     * 1 panel gathered against the far left wall.
+     * 1 panel gathered against the far right wall.
+   - ZERO panels in the middle or in the inner corners!
+======================================================================
+`;
+      } else {
+        panelConfigText = `
+======================================================================
+PANEL CONFIGURATION: TWO-PANEL CENTER-SPLIT (เปิดแยกกลาง - ผ้าม่าน 2 ผืน รวบซ้ายและขวา)
+======================================================================
+1. TWO (2) OPAQUE CURTAIN PANELS (ผ้าม่าน 2 ผืน เปิดแยกกลาง):
+   - Panel 1: Gathered and stacked on the LEFT side within the boundary.
+   - Panel 2: Gathered and stacked on the RIGHT side within the boundary.
+   - Meeting cleanly in the center when drawn closed, or neatly stacked to left and right when open.
+   - Exactly 2 panels total inside the boundary. DO NOT generate 3 panels or extra curtains in the middle!
+2. STRICT BOUNDARY RESTRICTION (ผ้าม่านต้องอยู่ในกรอบพื้นที่ผ้าม่านไม่ขาด ไม่เกิน):
+   - Both panels must stay 100% inside the designated boundary.
+   - DO NOT spill over onto adjacent perpendicular walls!
+======================================================================
+`;
+      }
     } else if (isA1OneWay) {
       panelConfigText = `
 PANEL CONFIGURATION:
 - Exactly ONE SINGLE continuous drapery panel (ผ้าม่าน 1 ผืน / One-way draw).
-- The curtain is a single wide piece drawn to one side.
+- The curtain is a single wide piece drawn to one side within the designated boundary.
 - ABSOLUTELY DO NOT split this into two panels meeting in the middle!
-`;
-    } else if (isA1Split) {
-      panelConfigText = `
-PANEL CONFIGURATION:
-- TWO matching drapery panels (ผ้าม่าน 2 ผืน เปิดแยกกลาง).
-- Meeting cleanly in the center when drawn closed, or neatly stacked to left and right when open.
 `;
     }
   }
@@ -557,7 +667,9 @@ MANDATORY BLIND DROP EXTENSION / MASK PROPORTION (100% FULLY CLOSED):
     }
 
     if (specs.hangStyle) {
-      if (specs.hangStyle.includes('ปิดราง') || specs.hangStyle.includes('บังราง')) {
+      if (specs.hangStyle.includes('หลุมฝ้า') || specs.hangStyle.includes('หลุม') || (specs.hangStyle.includes('ใต้ราง') && specs.hangStyle.includes('บังราง'))) {
+        hangDescription = 'Heading: Recessed ceiling pocket / pelmet installation (หลุมฝ้า/บังราง). The curtain track is mounted inside the recessed ceiling pocket, and the top headings of the curtains emerge neatly from the ceiling pocket/recess.';
+      } else if (specs.hangStyle.includes('ปิดราง') || specs.hangStyle.includes('บังราง')) {
         hangDescription = 'Heading: Track-concealing top heading (ปิดราง) where the fabric heading stands up to completely hide and conceal the track and runners from view.';
       } else if (specs.hangStyle.includes('โชว์ราง') || specs.hangStyle.includes('ใต้ราง')) {
         hangDescription = 'Heading: Cleanly suspended under the visible track (โชว์ราง).';
@@ -572,6 +684,39 @@ MANDATORY BLIND DROP EXTENSION / MASK PROPORTION (100% FULLY CLOSED):
       } else if (specs.bracket.includes('ผนัง')) {
         bracketDescription = 'Mounting: Wall-mounted onto the wall directly above the window frame.';
       }
+    }
+  }
+
+  // Margin Details: Top, Left, Right
+  let marginDetails = '';
+  if (specs.marginTop) {
+    const mt = specs.marginTop.trim();
+    if (mt.includes('ติดเพดาน') || mt.includes('ฝ้า')) {
+      marginDetails += '\n- Top Margin (ขอบบน): Mounted directly to the ceiling (ติดเพดาน). The curtain hangs starting from the ceiling down to the specified bottom hem line.';
+    } else if (mt.includes('กล่องบังราง') || mt.includes('หลุม')) {
+      marginDetails += '\n- Top Margin (ขอบบน): Installed in recessed ceiling pelmet box / drop ceiling pocket (ติดหลุมฝ้า/กล่องบังราง).';
+    } else if (mt && mt !== '-') {
+      marginDetails += `\n- Top Margin (ขอบบน): ${mt}.`;
+    }
+  }
+  if (specs.marginLeft) {
+    const ml = specs.marginLeft.trim();
+    if (ml.includes('พอดีเฟรม') || ml.includes('เฟรม')) {
+      marginDetails += '\n- Left Margin (ขอบซ้าย): Flush with the left window/door frame edge (พอดีเฟรม).';
+    } else if (ml.includes('ชนผนัง')) {
+      marginDetails += '\n- Left Margin (ขอบซ้าย): Extending all the way to touch the adjacent left wall (ชนผนัง).';
+    } else if (ml && ml !== '-') {
+      marginDetails += `\n- Left Margin (ขอบซ้าย): ${ml}.`;
+    }
+  }
+  if (specs.marginRight) {
+    const mr = specs.marginRight.trim();
+    if (mr.includes('พอดีเฟรม') || mr.includes('เฟรม')) {
+      marginDetails += '\n- Right Margin (ขอบขวา): Flush with the right window/door frame edge (พอดีเฟรม).';
+    } else if (mr.includes('ชนผนัง')) {
+      marginDetails += '\n- Right Margin (ขอบขวา): Extending all the way to touch the adjacent right wall (ชนผนัง).';
+    } else if (mr && mr !== '-') {
+      marginDetails += `\n- Right Margin (ขอบขวา): ${mr}.`;
     }
   }
 
@@ -679,13 +824,115 @@ ${hasTieback
 `;
   }
 
+  let windowTypeSection = '';
+  if (isBay) {
+    windowTypeSection = `
+======================================================================
+CRITICAL ARCHITECTURAL MANDATE: 3D BAY WINDOW / CORNER ALCOVE INSTALLATION
+(หน้าต่างเบย์ / หลืบม่านเข้ามุม / หน้าต่างหักมุม 3 มิติ ตามสเปกที่ระบุ)
+======================================================================
+1. CONTINUOUS CURVED TRACK (รางดัดโค้ง 1 ชุดต่อเนื่อง):
+   - The curtain track wraps along the ceiling recess as ONE UNIFIED CONTINUOUS CURVED TRACK across all walls of the alcove.
+   - IT IS NOT 3 SEPARATE CURTAINS! DO NOT divide the installation into 3 separate window sets!
+   ${isA1Split ? `
+   - FOR CENTER-SPLIT OPENING (แยกกลาง - รวบซ้ายขวา):
+     * The main opaque curtains are parted in the center and stacked ONLY at the two far ends:
+       - FAR LEFT WALL (ผนังซ้ายสุด): 1 neat gathered stack (รวบซ้าย).
+       - FAR RIGHT WALL (ผนังขวาสุด): 1 neat gathered stack (รวบขวา).
+     * ZERO OPAQUE CURTAINS IN THE REAR CENTER WINDOW!
+     * ZERO OPAQUE CURTAINS IN THE TWO INNER CORNERS!
+     * The rear center window must remain open to provide a clean panoramic view!
+     * If 2-layer sheer underlayer is specified, the translucent sheer hangs along the curved track across the window glazing while the main opaque curtains frame the far left and right walls.
+   ` : isA1OneWayLeft ? `
+   - FOR ONE-WAY DRAW TO LEFT (รวบซ้าย 1 ผืน):
+     * The curtain is gathered ONLY at the far left wall.
+     * The center and right sections remain completely clear and open!
+   ` : isA1OneWayRight ? `
+   - FOR ONE-WAY DRAW TO RIGHT (รวบขวา 1 ผืน):
+     * The curtain is gathered ONLY at the far right wall.
+     * The center and left sections remain completely clear and open!
+   ` : `
+   - Curtains follow the continuous curved track neatly along the ceiling recess.
+   `}
+2. RECESSED CEILING POCKET / PELMET (หลุมฝ้า/บังราง):
+   - Curtains and track emerge cleanly from the recessed ceiling pocket along the alcove contour.
+======================================================================
+`;
+  } else {
+    windowTypeSection = `
+======================================================================
+CRITICAL ARCHITECTURAL MANDATE: STRAIGHT FLAT OPENING / WINDOW (บานตรงปกติ - รางตรง)
+======================================================================
+1. STRAIGHT FLAT TRACK (บานตรงปกติ - รางตรงระนาบเดียว ไม่โค้ง):
+   - This installation is a STANDARD STRAIGHT, FLAT OPENING / WINDOW (บานตรงปกติ ไม่ใช่บานโค้ง/ไม่เข้ามุม).
+   - The curtain track runs in a SINGLE STRAIGHT LINE directly across the top of the designated opening frame.
+   - ABSOLUTELY NO CURVES, NO CORNER TURNS, AND NO WRAPPING ONTO SIDE WALLS!
+   - DO NOT bend, curve, or wrap the track or curtains onto adjacent perpendicular walls!
+
+2. ZERO CURTAINS ON SIDE WALLS (ห้ามติดผ้าม่านบนผนังด้านข้างเด็ดขาด):
+   - The adjacent perpendicular walls (such as side walls with molding, wainscoting, decorative paneling, or painted walls) MUST REMAIN 100% BARE AND UNTOUCHED.
+   - Any curtain placed on the side perpendicular walls is a FATAL DEFECT!
+   - Curtains MUST HANG FLAT strictly within the plane of the doorway/window opening inside the designated boundary.
+======================================================================
+`;
+  }
+
+  // Exact user-drawn polygon coordinates
+  let polygonSection = '';
+  if (specs.polygonPoints && specs.polygonPoints.length >= 3) {
+    polygonSection = `
+======================================================================
+EXACT USER-DRAWN POLYGON MASK COORDINATES (TARGET BOUNDARY & TRACK):
+======================================================================
+The user has designated the exact curtain installation boundary on this photograph with the following polygon vertices (percentages of image width and height):
+${specs.polygonPoints.map((p, idx) => `  - Point ${idx + 1}: X: ${p.x.toFixed(1)}%, Y: ${p.y.toFixed(1)}%`).join('\n')}
+
+GUIDE IMAGE REFERENCE & SPECIFICATION COMPLIANCE (ยึดตามที่กำหนดเป็นหลัก ไม่คิดไปเอง):
+- In the attached GUIDE IMAGE, the exact curtain installation zone is clearly outlined in red with vertex dots, and the exact curtain positions are illustrated:
+  ${isBay ? `
+  * CURVED / BAY WINDOW TREATMENT: The track follows the continuous curved ceiling recess along the top polygon vertices across the alcove.
+  * CURTAIN STACKS: Respect the designated stacks shown in the guide image.
+  ` : `
+  * STRAIGHT FLAT TREATMENT (บานตรงปกติ): The track is straight across the top vertices of the opening.
+  * DO NOT BEND OR CURVE THE TRACK ONTO SIDE WALLS!
+  ${isA1OneWayLeft ? `
+  * CURTAIN IS GATHERED ON THE LEFT ONLY (รวบซ้าย 1 ผืน): The curtain stack is located ONLY on the left inside the red boundary. The right side and center of the opening are completely clear and open!
+  ` : isA1OneWayRight ? `
+  * CURTAIN IS GATHERED ON THE RIGHT ONLY (รวบขวา 1 ผืน): The curtain stack is located ONLY on the right inside the red boundary. The left side and center of the opening are completely clear and open!
+  ` : `
+  * CENTER-SPLIT (แยกกลาง 2 ผืน): Curtains are gathered on the left and right inside the red boundary.
+  `}
+  `}
+- STRICT BOUNDARY ENFORCEMENT (ผ้าม่านต้องอยู่ในกรอบพื้นที่ผ้าม่านไม่ขาด ไม่เกิน):
+  * The curtains MUST be installed 100% STRICTLY WITHIN THIS DESIGNATED POLYGON BOUNDARY.
+  * DO NOT spill over or install any curtain fabric outside this red boundary!
+  * Top: Curtains hang cleanly from the top edge (หลุมฝ้า/เพดาน).
+  * Bottom: Curtains hang down to the bottom boundary (hovering 1-2 cm above the floor as specified).
+======================================================================
+`;
+  }
+
   // Strict boundary constraints
   let boundarySection = '';
   if (specs.boundary) {
     const { minX, maxX, minY, maxY } = specs.boundary;
-    boundarySection = `
+    if (isBay) {
+      boundarySection = `
 =====================================================
-EXACT BOUNDARY RESTRICTION & FULL COVERAGE RULES:
+OVERALL 3D BOUNDARY FOOTPRINT (ALCOVE SPAN):
+=====================================================
+The multi-sided corner/bay installation zone spans within:
+- Left-most corner: ${minX.toFixed(1)}% of total image width
+- Right-most corner: ${maxX.toFixed(1)}% of total image width
+- Top ceiling track: ${minY.toFixed(1)}% of total image height
+- Bottom hem line: ${maxY.toFixed(1)}% of total image height
+
+Remember: Curtains follow the continuous curved track across the designated alcove within these bounds.
+`;
+    } else {
+      boundarySection = `
+=====================================================
+EXACT BOUNDARY RESTRICTION (ผ้าม่านต้องอยู่ในกรอบพื้นที่ผ้าม่านไม่ขาด ไม่เกิน):
 =====================================================
 The user has designated the exact target window frame coordinates on this photograph:
 - Left Edge: ${minX.toFixed(1)}% of total image width
@@ -694,10 +941,11 @@ The user has designated the exact target window frame coordinates on this photog
 - Bottom Edge: ${maxY.toFixed(1)}% of total image height
 
 CRITICAL BOUNDARY ENFORCEMENT:
-1. FULL EDGE-TO-EDGE SPAN: The curtain installation MUST span across the entire window area from Left (${minX.toFixed(1)}%) to Right (${maxX.toFixed(1)}%). Do NOT leave the window partially uncovered or short of these borders.
-2. ZERO OVERHANG / NO SPILLAGE: The curtain fabric, track, and hardware MUST NOT spill over beyond ${minX.toFixed(1)}% on the left or ${maxX.toFixed(1)}% on the right onto adjacent furniture, doors, light switches, or unrelated walls.
-3. Keep all wall and ceiling surfaces outside [Left ${minX.toFixed(1)}% to Right ${maxX.toFixed(1)}%] 100% clean, identical to the source photo.
+1. STRICT BOUNDARY (ไม่ขาด ไม่เกิน): Curtains must be strictly confined within X: [${minX.toFixed(1)}% - ${maxX.toFixed(1)}%] and Y: [${minY.toFixed(1)}% - ${maxY.toFixed(1)}%].
+2. ZERO OVERFLOW ONTO ADJACENT WALLS: The curtain fabric, track, and hardware MUST NOT spill over beyond ${minX.toFixed(1)}% on the left or ${maxX.toFixed(1)}% on the right onto adjacent perpendicular walls, wall moldings, or columns.
+3. Keep all wall and ceiling surfaces outside [Left ${minX.toFixed(1)}% to Right ${maxX.toFixed(1)}%] 100% clean and identical to the original room photo.
 `;
+    }
   }
 
   let productIntro = 'Carefully perform an architectural inpainting operation on the provided room photograph to realistically install tailor-made curtains.';
@@ -726,6 +974,10 @@ CRITICAL NON-NEGOTIABLE ARCHITECTURAL PRESERVATION RULES:
 3. UNTOUCHED BACKGROUND:
    - All furniture, lamps, floors, artwork, and outdoor views outside the curtain area must remain untouched in pixel-level fidelity.
 
+${windowTypeSection}
+
+${polygonSection}
+
 ${boundarySection}
 
 ${panelConfigText}
@@ -743,7 +995,7 @@ ${fabricDescription || '- Premium drapery fabric with rich authentic texture and
 
 MOUNTING & TAILORING:
 - Track: ${trackDescription} ${hangDescription} ${bracketDescription}
-- Margins & Hem: ${hemDescription || 'Cleanly tailored hem hovering just above the floor.'}
+- Margins & Hem: ${hemDescription || 'Cleanly tailored hem hovering just above the floor.'}${marginDetails}
 - Room Position: ${specs.roomPos || 'Interior room window'}
 ${specs.width && specs.height ? `- Specified dimensions: Width ${specs.width} cm, Height ${specs.height} cm.` : ''}
 

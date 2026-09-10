@@ -126,8 +126,10 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
     try {
       setLoadingQuota(true);
       const res = await fetch(`/api/ai-quota?username=${encodeURIComponent(appUser.username)}`);
-      const data = await res.json();
-      if (data.success) {
+      const text = await res.text();
+      let data: any = null;
+      try { data = JSON.parse(text); } catch {}
+      if (data && data.success) {
         setQuota({ usage: data.usage, limit: data.limit, month: data.month });
         setAdminLimits(data.monthlyLimits || {});
         setDefaultLimit(data.defaultLimit || 20);
@@ -173,10 +175,16 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
 
     const primaryArea: any = item.areas?.[0] || {};
     const itemMaskPct = (primaryArea.maskPct !== undefined && primaryArea.maskPct !== null) ? primaryArea.maskPct : 100;
-    const sMain1 = primaryArea.styleMain1 || item.styleMain1 || (item as any).styleMain || '';
-    const sMain2 = primaryArea.styleMain2 || item.styleMain2 || '';
-    const aMain1 = primaryArea.styleAction1 || item.styleAction1 || (item as any).styleAction || '';
-    const aMain2 = primaryArea.styleAction2 || item.styleAction2 || '';
+
+    const cleanVal = (val: string | undefined | null) => {
+      if (!val || val === '-ตามเริ่มต้น-' || val === '-รูปแบบ-' || val === '-เปิดปิด-') return '';
+      return val.trim();
+    };
+
+    const sMain1 = cleanVal(primaryArea.styleMain1) || cleanVal(item.styleMain1) || cleanVal((item as any).styleMain) || 'ม่านจีบ';
+    const sMain2 = cleanVal(primaryArea.styleMain2) || cleanVal(item.styleMain2) || (item.layers === 2 ? 'ม่านจีบ' : '');
+    const aMain1 = cleanVal(primaryArea.styleAction1) || cleanVal(item.styleAction1) || cleanVal((item as any).styleAction) || 'รวบซ้าย';
+    const aMain2 = cleanVal(primaryArea.styleAction2) || cleanVal(item.styleAction2) || (item.layers === 2 ? aMain1 : '');
 
     // Search fabrics across all areas of this item as fallback
     const allItemFabs = item.areas?.flatMap((a: any) => a.fabrics || []).filter(Boolean) || [];
@@ -263,8 +271,16 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
         fabrics: area.fabrics,
         styleMain1: area.styleMain1,
         styleAction1: area.styleAction1,
+        points: area.points,
       };
     });
+
+    // ONLY consider it a bay/curved window if track explicitly has 'โค้ง'/'ดัด' OR room has 'เบย์'/'เข้ามุม' with >= 5 points
+    const tracksStr = (item.tracks || []).join(' ').toLowerCase();
+    const roomStr = (item.roomPos || '').toLowerCase();
+    const isCurvedTrack = tracksStr.includes('โค้ง') || tracksStr.includes('ดัด') || tracksStr.includes('curve');
+    const isBayRoom = roomStr.includes('เบย์') || roomStr.includes('bay') || roomStr.includes('เข้ามุม') || roomStr.includes('หักมุม') || roomStr.includes('โค้ง');
+    const isBayOrCorner = isCurvedTrack || (isBayRoom && allPoints.length >= 5);
 
     const prompt = buildCurtainAiPrompt({
       styleName1: sMain1,
@@ -293,9 +309,12 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
       height: primaryArea.height,
       maskPct: itemMaskPct,
       boundary,
+      polygonPoints: allPoints.length > 0 ? allPoints : undefined,
+      isBayOrCorner,
       areas: mappedAreas,
       hasSwatch1: !!swatch1Img,
       hasSwatch2: !!swatch2Img,
+      hasGuideImage: allPoints.length >= 2,
     });
 
     setGeneratingIds(prev => new Set(prev).add(item.id));
@@ -383,16 +402,274 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
         return imgUrl;
       };
 
-      const [safeSwatch1, safeSwatch2] = await Promise.all([
+      // Generate Guide Image (Mask Overlay) illustrating the exact layout from on-site data (matching 173800)
+      const generateGuideOverlay = async (
+        photoDataUrl: string | null | undefined,
+        areasList: any[],
+        itemConfig: {
+          action: string;
+          style: string;
+          maskPct: number;
+          layers: number;
+          fabricColor?: string;
+        }
+      ): Promise<string | undefined> => {
+        if (!photoDataUrl || !areasList || areasList.length === 0) return undefined;
+        const hasAnyPoints = areasList.some(a => a.points && a.points.length >= 2);
+        if (!hasAnyPoints) return undefined;
+
+        try {
+          const img = new Image();
+          img.src = photoDataUrl;
+          await new Promise((resolve, reject) => {
+            if (img.complete && img.naturalWidth > 0) return resolve(null);
+            img.onload = () => resolve(null);
+            img.onerror = () => reject(new Error('Image failed to load for guide'));
+            setTimeout(() => reject(new Error('Image timeout for guide')), 3000);
+          });
+
+          const maxDim = 1024;
+          let w = img.naturalWidth;
+          let h = img.naturalHeight;
+          if (w > maxDim || h > maxDim) {
+            if (w > h) {
+              h = Math.round((h * maxDim) / w);
+              w = maxDim;
+            } else {
+              w = Math.round((w * maxDim) / h);
+              h = maxDim;
+            }
+          }
+
+          const canvas = document.createElement('canvas');
+          canvas.width = w;
+          canvas.height = h;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) return undefined;
+
+          // Draw original room photo
+          ctx.drawImage(img, 0, 0, w, h);
+
+          const { action, maskPct, layers } = itemConfig;
+          const isSplit = action.includes('แยกกลาง') || action.includes('กลาง') || action.includes('2 ผืน');
+          const isOneWayLeft = (action.includes('ซ้าย') || action.includes('1 ผืน')) && !isSplit;
+          const isOneWayRight = action.includes('ขวา') && !isSplit;
+          const mRatio = Math.max(0.14, Math.min(0.38, (maskPct || 20) / 100));
+
+          areasList.forEach((area: any) => {
+            if (area.points && area.points.length >= 2) {
+              const xs = area.points.map((p: any) => (p.x / 100) * w);
+              const ys = area.points.map((p: any) => (p.y / 100) * h);
+              const minX_px = Math.min(...xs);
+              const maxX_px = Math.max(...xs);
+              const minY_px = Math.min(...ys);
+              const maxY_px = Math.max(...ys);
+              const w_px = maxX_px - minX_px;
+              const h_px = maxY_px - minY_px;
+
+              // 1. Clip inside user polygon
+              ctx.save();
+              ctx.beginPath();
+              area.points.forEach((p: any, pIdx: number) => {
+                const px = (p.x / 100) * w;
+                const py = (p.y / 100) * h;
+                if (pIdx === 0) ctx.moveTo(px, py);
+                else ctx.lineTo(px, py);
+              });
+              ctx.closePath();
+              ctx.clip();
+
+              const stackW = Math.max(w_px * mRatio, w * 0.08);
+
+              // Helper to draw a realistic curtain stack representation
+              const drawCurtainStack = (startX: number, stackWidth: number) => {
+                const endX = startX + stackWidth;
+                const grad = ctx.createLinearGradient(startX, 0, endX, 0);
+                grad.addColorStop(0, 'rgba(215, 200, 185, 0.92)');
+                grad.addColorStop(0.3, 'rgba(235, 225, 215, 0.96)');
+                grad.addColorStop(0.7, 'rgba(210, 195, 180, 0.90)');
+                grad.addColorStop(1, 'rgba(185, 170, 155, 0.92)');
+                ctx.fillStyle = grad;
+                ctx.fillRect(startX, minY_px, stackWidth, h_px);
+
+                // Subtle vertical fold pleats
+                const numPleats = Math.max(4, Math.round(stackWidth / 14));
+                for (let pl = 1; pl < numPleats; pl++) {
+                  const plX = startX + (stackWidth * pl) / numPleats;
+                  ctx.strokeStyle = 'rgba(90, 70, 50, 0.35)';
+                  ctx.lineWidth = 1.5;
+                  ctx.beginPath();
+                  ctx.moveTo(plX, minY_px);
+                  ctx.lineTo(plX, maxY_px);
+                  ctx.stroke();
+                }
+
+                // Stack outline
+                ctx.strokeStyle = 'rgba(70, 50, 30, 0.5)';
+                ctx.lineWidth = 1.5;
+                ctx.strokeRect(startX, minY_px, stackWidth, h_px);
+              };
+
+              if (isSplit) {
+                // Left Curtain Stack
+                drawCurtainStack(minX_px, stackW);
+                // Right Curtain Stack
+                const rightX = maxX_px - stackW;
+                drawCurtainStack(rightX, stackW);
+
+                // Middle area is OPEN!
+                const midX = minX_px + stackW;
+                const midW = rightX - midX;
+                if (midW > 0 && layers === 2) {
+                  // Soft sheer underlayer wash across center glass
+                  ctx.fillStyle = 'rgba(255, 255, 255, 0.20)';
+                  ctx.fillRect(midX, minY_px, midW, h_px);
+                  const numSheerWaves = Math.max(3, Math.round(midW / 40));
+                  for (let sw = 1; sw < numSheerWaves; sw++) {
+                    const swX = midX + (midW * sw) / numSheerWaves;
+                    ctx.strokeStyle = 'rgba(255, 255, 255, 0.30)';
+                    ctx.lineWidth = 1;
+                    ctx.beginPath();
+                    ctx.moveTo(swX, minY_px);
+                    ctx.lineTo(swX, maxY_px);
+                    ctx.stroke();
+                  }
+                }
+              } else if (isOneWayLeft) {
+                drawCurtainStack(minX_px, stackW);
+              } else if (isOneWayRight) {
+                drawCurtainStack(maxX_px - stackW, stackW);
+              } else {
+                // Standard full coverage or blinds
+                ctx.fillStyle = 'rgba(239, 68, 68, 0.25)';
+                ctx.fill();
+              }
+
+              ctx.restore(); // Restore out of clipping path
+
+              // 2. Stroke the user polygon boundary in red (matching ImageAreaEditor)
+              ctx.save();
+              ctx.beginPath();
+              area.points.forEach((p: any, pIdx: number) => {
+                const px = (p.x / 100) * w;
+                const py = (p.y / 100) * h;
+                if (pIdx === 0) ctx.moveTo(px, py);
+                else ctx.lineTo(px, py);
+              });
+              ctx.closePath();
+              ctx.strokeStyle = '#ef4444';
+              ctx.lineWidth = Math.max(2.5, Math.round(w * 0.0035));
+              ctx.lineJoin = 'round';
+              ctx.stroke();
+
+              // 3. Highlight top ceiling track line
+              if (area.points.length >= 3) {
+                ctx.strokeStyle = '#fbbf24';
+                ctx.lineWidth = Math.max(3, Math.round(w * 0.0045));
+                ctx.beginPath();
+                const sortedByY = [...area.points].sort((a: any, b: any) => a.y - b.y);
+                const minYVal = sortedByY[0].y;
+                const topPoints = area.points.filter((p: any) => Math.abs(p.y - minYVal) < 25);
+                topPoints.forEach((p: any, tIdx: number) => {
+                  const px = (p.x / 100) * w;
+                  const py = (p.y / 100) * h;
+                  if (tIdx === 0) ctx.moveTo(px, py);
+                  else ctx.lineTo(px, py);
+                });
+                ctx.stroke();
+              }
+
+              // 4. Draw vertex dots
+              area.points.forEach((p: any) => {
+                const px = (p.x / 100) * w;
+                const py = (p.y / 100) * h;
+                const radius = Math.max(4, Math.round(w * 0.0055));
+                ctx.beginPath();
+                ctx.arc(px, py, radius, 0, Math.PI * 2);
+                ctx.fillStyle = '#ffffff';
+                ctx.fill();
+                ctx.strokeStyle = '#dc2626';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+              });
+
+              // 5. Informative text badges for Gemini
+              ctx.font = `bold ${Math.max(12, Math.round(w * 0.016))}px sans-serif`;
+              ctx.textBaseline = 'top';
+
+              if (isSplit) {
+                // Left badge
+                ctx.fillStyle = '#1e3a8a';
+                ctx.fillText('◀ รวบซ้าย (LEFT STACK)', minX_px + 8, minY_px + 12);
+                // Right badge
+                ctx.fillStyle = '#1e3a8a';
+                ctx.fillText('รวบขวา (RIGHT STACK) ▶', maxX_px - stackW + 8, minY_px + 12);
+                // Center open badge
+                ctx.fillStyle = '#065f46';
+                const centerText = layers === 2 ? '◎ ม่านโปร่ง / เปิดแยกกลาง (SHEER / OPEN)' : '◎ เปิดโล่งแยกกลาง (OPEN GLASS)';
+                const textMetrics = ctx.measureText(centerText);
+                const midCenter = minX_px + stackW + (w_px - 2 * stackW - textMetrics.width) / 2;
+                if (midCenter > minX_px + stackW) {
+                  ctx.fillText(centerText, midCenter, minY_px + 16);
+                }
+              } else if (isOneWayLeft) {
+                // Left badge: Curtain stack
+                ctx.fillStyle = '#1e3a8a';
+                ctx.fillText('◀ ผ้าม่านรวบซ้าย (CURTAIN STACK LEFT)', minX_px + 8, minY_px + 12);
+                // Center/Right badge: Open
+                ctx.fillStyle = '#065f46';
+                const openText = layers === 2 ? '◎ ม่านโปร่ง / เปิดโล่งไม่มีม่านทึบ (OPEN / NO OPAQUE CURTAIN)' : '◎ เปิดโล่ง ไม่มีผ้าม่านด้านนี้ (OPEN DOORWAY / NO CURTAIN)';
+                const textMetrics = ctx.measureText(openText);
+                const midCenter = minX_px + stackW + 16;
+                if (midCenter + textMetrics.width <= maxX_px) {
+                  ctx.fillText(openText, midCenter, minY_px + 16);
+                }
+              } else if (isOneWayRight) {
+                // Right badge: Curtain stack
+                ctx.fillStyle = '#1e3a8a';
+                ctx.fillText('ผ้าม่านรวบขวา (CURTAIN STACK RIGHT) ▶', maxX_px - stackW + 8, minY_px + 12);
+                // Left/Center badge: Open
+                ctx.fillStyle = '#065f46';
+                const openText = layers === 2 ? '◎ ม่านโปร่ง / เปิดโล่งไม่มีม่านทึบ (OPEN / NO OPAQUE CURTAIN)' : '◎ เปิดโล่ง ไม่มีผ้าม่านด้านนี้ (OPEN DOORWAY / NO CURTAIN)';
+                ctx.fillText(openText, minX_px + 12, minY_px + 16);
+              }
+
+              ctx.restore();
+            }
+          });
+
+          return canvas.toDataURL('image/jpeg', 0.85);
+        } catch (e) {
+          console.warn('Could not generate guide overlay image:', e);
+          return undefined;
+        }
+      };
+
+      const [safePhotoBase64, safeSwatch1, safeSwatch2] = await Promise.all([
+        toClientBase64(originalPhotoUrl),
         toClientBase64(swatch1Img),
         toClientBase64(swatch2Img),
       ]);
 
-      const res = await fetch('/api/generate-ai-curtain', {
+      const basePhoto = safePhotoBase64 || originalPhotoUrl;
+      const guideImageDataUrl = await generateGuideOverlay(
+        basePhoto,
+        item.areas || [],
+        {
+          action: aMain1,
+          style: sMain1,
+          maskPct: itemMaskPct,
+          layers: item.layers || 1,
+          fabricColor: fab1?.color,
+        }
+      );
+
+      let res = await fetch('/api/generate-ai-curtain', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          image: originalPhotoUrl,
+          image: basePhoto,
+          guideImage: guideImageDataUrl,
           prompt,
           swatch1: safeSwatch1,
           swatch2: safeSwatch2,
@@ -402,9 +679,46 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
         }),
       });
 
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        throw new Error(data.message || data.error || 'การสร้างภาพล้มเหลว');
+      // If 404, retry without /api prefix
+      if (res.status === 404) {
+        try {
+          const retryRes = await fetch('/generate-ai-curtain', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              image: basePhoto,
+              guideImage: guideImageDataUrl,
+              prompt,
+              swatch1: safeSwatch1,
+              swatch2: safeSwatch2,
+              username: appUser.username,
+              itemId: item.id,
+              aspectRatio: determinedAspectRatio,
+            }),
+          });
+          if (retryRes.status !== 404) {
+            res = retryRes;
+          }
+        } catch {}
+      }
+
+      const responseText = await res.text();
+      let data: any = null;
+      try {
+        data = JSON.parse(responseText);
+      } catch (parseErr) {
+        console.error("Non-JSON API response from server:", responseText);
+        if (responseText.includes("A server error") || res.status >= 500) {
+          throw new Error("เซิร์ฟเวอร์ Vercel เกิดข้อผิดพลาด (500): กรุณาตรวจสอบว่าได้ตั้งค่า GEMINI_API_KEY ใน Environment Variables ของ Vercel และกด Redeploy แล้ว");
+        }
+        throw new Error(`เซิร์ฟเวอร์ตอบกลับผิดรูปแบบ (${res.status}): ${responseText.slice(0, 100)}`);
+      }
+
+      if (!res.ok || !data?.success) {
+        if (data?.isQuotaExceeded || data?.error === "GEMINI_QUOTA_EXCEEDED" || res.status === 429) {
+          throw new Error("โควต้าโมเดลสร้างรูปภาพ Gemini API เต็ม หรือบัญชีเป็น Free Tier (โมเดลสร้างรูปภาพต้องเปิดใช้งาน Billing/Pay-as-you-go ใน Google AI Studio)");
+        }
+        throw new Error(data?.message || data?.error || 'การสร้างภาพล้มเหลว');
       }
 
       const currentHistory = Array.isArray(item.aiImages) ? item.aiImages : (item.aiImage ? [item.aiImage] : []);
@@ -526,19 +840,44 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
     onBack();
   };
 
+  // Sync document title automatically to ensure any PDF export gets the required name format
+  useEffect(() => {
+    const customer = (generalInfo.customerName || '').trim();
+    if (customer) {
+      document.title = `ใบสรุปงานติดตั้งผ้าม่าน - ${customer}`;
+    }
+  }, [generalInfo.customerName]);
+
   const handlePrintSelected = () => {
     if (selectedIds.size === 0 && !includeCoverPage) {
       setDialog({ type: 'alert', message: 'กรุณาเลือกหน้าที่ต้องการพิมพ์อย่างน้อย 1 หน้า' });
       return;
     }
+    const customer = (generalInfo.customerName || 'ลูกค้า').trim();
     const originalTitle = document.title;
-    document.title = `ใบสรุปงานติดตั้งผ้าม่าน คุณ ${generalInfo.customerName || 'ลูกค้า'}`;
+    document.title = `ใบสรุปงานติดตั้งผ้าม่าน - ${customer}`;
     try {
       window.print();
     } catch (e) {
       console.error(e);
     }
-    setTimeout(() => { document.title = originalTitle; }, 2000);
+    setTimeout(() => { document.title = originalTitle; }, 3000);
+  };
+
+  const handleShareSelectedPDF = () => {
+    if (selectedIds.size === 0 && !includeCoverPage) {
+      setDialog({ type: 'alert', message: 'กรุณาเลือกหน้าที่ต้องการแชร์ PDF อย่างน้อย 1 หน้า' });
+      return;
+    }
+    const customer = (generalInfo.customerName || 'ลูกค้า').trim();
+    const originalTitle = document.title;
+    document.title = `ใบสรุปงานติดตั้งผ้าม่าน - ${customer}`;
+    try {
+      window.print();
+    } catch (e) {
+      console.error(e);
+    }
+    setTimeout(() => { document.title = originalTitle; }, 3000);
   };
 
   const downloadImage = (url: string, filename: string) => {
@@ -744,6 +1083,15 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
                 <Sliders size={14} /> ตั้งค่าโควต้า
               </button>
             )}
+
+            {/* Share / PDF Export Button */}
+            <button
+              onClick={handleShareSelectedPDF}
+              className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white px-3.5 py-1.5 rounded-lg text-sm font-bold shadow-md transition-all"
+              title="แชร์ หรือ บันทึกเป็นไฟล์ PDF"
+            >
+              <Share2 size={16} /> แชร์ PDF
+            </button>
 
             {/* Print / PDF Export Button */}
             <button
@@ -1106,6 +1454,17 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
                   {item.aiImage && (
                     <span className="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 border border-emerald-300">
                       <Check size={10} /> AI พร้อมแล้ว
+                    </span>
+                  )}
+                  {((item.roomPos || '').includes('มุม') ||
+                    (item.roomPos || '').includes('เบย์') ||
+                    (item.roomPos || '').toLowerCase().includes('bay') ||
+                    (item.areas?.some((a: any) => (a.points?.length || 0) >= 5))) && (
+                    <span
+                      className="bg-purple-100 text-purple-800 text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 border border-purple-300"
+                      title="ระบบตรวจพบหน้าต่างเข้ามุม/เบย์ และจะประมวลผลคำสั่งและไกด์มาร์กม่านต่อเนื่อง 3 มิติ"
+                    >
+                      📐 ม่านเข้ามุม/3D Bay Window
                     </span>
                   )}
                 </div>

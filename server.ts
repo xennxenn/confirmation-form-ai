@@ -49,12 +49,23 @@ function saveQuotaStore(data: QuotaStore) {
   }
 }
 
+function getApiKey(): string {
+  const key = (
+    process.env.GEMINI_API_KEY ||
+    process.env.VITE_GEMINI_API_KEY ||
+    process.env.GOOGLE_API_KEY ||
+    process.env.API_KEY ||
+    ""
+  ).trim();
+  return key;
+}
+
 let currentApiKey: string | null = null;
 let aiClient: GoogleGenAI | null = null;
 function getGenAI(): GoogleGenAI {
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = getApiKey();
   if (!apiKey) {
-    throw new Error("ระบบยังไม่ได้ตั้งค่า GEMINI_API_KEY บน Server กรุณาตั้งค่าใน Environment Variables");
+    throw new Error("ระบบยังไม่ได้ตั้งค่า GEMINI_API_KEY บน Server กรุณาตั้งค่าใน Environment Variables (ชื่อตัวแปร GEMINI_API_KEY)");
   }
   if (!aiClient || currentApiKey !== apiKey) {
     currentApiKey = apiKey;
@@ -63,6 +74,7 @@ function getGenAI(): GoogleGenAI {
       httpOptions: {
         headers: {
           'User-Agent': 'aistudio-build',
+          'x-goog-api-key': apiKey,
         },
       },
     });
@@ -116,6 +128,15 @@ async function convertImageToBuffer(imageInput: string): Promise<{ data: string;
 
 export const app = express();
 
+// Restore original path if Vercel altered req.url during rewrite
+app.use((req, _res, next) => {
+  const matchedPath = (req.headers["x-matched-path"] || req.headers["x-now-route-matches"] || "") as string;
+  if (matchedPath && matchedPath.startsWith("/api")) {
+    req.url = matchedPath;
+  }
+  next();
+});
+
 // Enable CORS for Vercel/external domains
 app.use((req, res, next) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -127,9 +148,19 @@ app.use((req, res, next) => {
   next();
 });
 
-// Body parser with 50MB limit for image uploads
-app.use(express.json({ limit: "50mb" }));
-app.use(express.urlencoded({ extended: true, limit: "50mb" }));
+// Body parser with 50MB limit for image uploads (guard against re-parsing in Vercel)
+app.use((req, res, next) => {
+  if (req.body && typeof req.body === "object") {
+    return next();
+  }
+  express.json({ limit: "50mb" })(req, res, next);
+});
+app.use((req, res, next) => {
+  if (req.body && typeof req.body === "object") {
+    return next();
+  }
+  express.urlencoded({ extended: true, limit: "50mb" })(req, res, next);
+});
 
 // Create API Router
 const apiRouter = express.Router();
@@ -189,10 +220,10 @@ apiRouter.post("/ai-quota/limit", (req, res) => {
   }
 });
 
-// Generate realistic curtain preview with Gemini
-apiRouter.post("/generate-ai-curtain", async (req, res) => {
+// Generate realistic curtain preview with Gemini (support both endpoint names)
+apiRouter.post(["/generate-ai-curtain", "/generate-curtain"], async (req, res) => {
   try {
-    const { image, prompt, username, swatch1, swatch2, aspectRatio } = req.body;
+    const { image, guideImage, prompt, username, swatch1, swatch2, aspectRatio } = req.body;
 
     if (!image) {
       return res.status(400).json({ error: "ไม่พบรูปภาพหน้างานต้นฉบับสำหรับส่งให้ AI" });
@@ -249,6 +280,38 @@ apiRouter.post("/generate-ai-curtain", async (req, res) => {
         },
       },
     ];
+
+    // Add Guide Image / Installation Mask reference if provided
+    if (guideImage && typeof guideImage === "string" && guideImage.trim().length > 0) {
+      try {
+        const guide = await convertImageToBuffer(guideImage);
+        parts.push({
+          text:
+            "IMAGE (TARGET INSTALLATION MASK & EXACT CURTAIN STACK POSITIONING GUIDE):\n" +
+            "This guide image shows the original room photo with the user's EXACT TARGET INSTALLATION ZONE (red outline polygon) and EXACT CURTAIN STACK POSITIONS.\n" +
+            "CRITICAL RULES (ยึดตามที่กำหนดเป็นหลัก ไม่คิดไปเอง):\n" +
+            "1. STRICT BOUNDARY (ผ้าม่านต้องอยู่ในกรอบพื้นที่ผ้าม่านไม่ขาด ไม่เกิน):\n" +
+            "   - Curtains MUST be installed 100% strictly within the red polygon boundary.\n" +
+            "   - ABSOLUTELY DO NOT install or extend curtains outside this red frame onto adjacent perpendicular side walls, moldings, or columns!\n" +
+            "2. STRAIGHT VS CURVED (แบบโค้งหรือแบบตรงตามที่พื้นที่ผ้าม่านกำหนด):\n" +
+            "   - If this is a straight window/opening (บานตรงปกติ), the curtain hangs on a straight track directly across the opening. DO NOT bend or curve the track!\n" +
+            "   - If this is a curved/bay alcove (บานโค้ง/รางดัด), the curtain follows the continuous curved track.\n" +
+            "3. CURTAIN STACK POSITION (ตำแหน่งการรวบม่านตามที่ระบุ):\n" +
+            "   - If one-way draw to the left (รวบซ้าย): The curtain gathers ONLY on the left side inside the red boundary. The right side is completely clear and open!\n" +
+            "   - If one-way draw to the right (รวบขวา): The curtain gathers ONLY on the right side inside the red boundary. The left side is completely clear and open!\n" +
+            "   - If center-split (แยกกลาง): Two panels gathered symmetrically on left and right inside the boundary.\n" +
+            "4. Render photorealistic curtains matching the room's real lighting, shadows, and fabric textures. DO NOT render the red guide markings, outlines, or text labels in the final output.",
+        });
+        parts.push({
+          inlineData: {
+            data: guide.data,
+            mimeType: guide.mimeType || "image/jpeg",
+          },
+        });
+      } catch (gErr) {
+        console.warn("Could not process guideImage:", gErr);
+      }
+    }
 
     // Add Swatch 1 reference image if provided
     if (swatch1 && typeof swatch1 === "string" && swatch1.trim().length > 0) {
@@ -404,9 +467,27 @@ apiRouter.post("/generate-ai-curtain", async (req, res) => {
   }
 });
 
-// Mount router at both /api and / so all Vercel and local requests match cleanly
+// Catch-all 404 handler for API routes (always return JSON, never HTML)
+apiRouter.all("*", (req, res) => {
+  res.status(404).json({
+    error: "API_ROUTE_NOT_FOUND",
+    message: `API Route not found: ${req.method} ${req.originalUrl || req.url}`,
+  });
+});
+
+// Mount router exclusively at /api so web pages and static assets are served normally
 app.use("/api", apiRouter);
-app.use(apiRouter);
+
+// Global express error handler ensuring JSON responses
+app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  console.error("Express Global Error:", err);
+  if (!res.headersSent) {
+    res.status(500).json({
+      error: "INTERNAL_SERVER_ERROR",
+      message: err?.message || "เกิดข้อผิดพลาดในการประมวลผลบนเซิร์ฟเวอร์",
+    });
+  }
+});
 
 async function startServer() {
   const PORT = 3000;

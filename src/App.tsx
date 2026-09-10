@@ -359,7 +359,23 @@ const App: React.FC = () => {
     }, 50);
   };
 
+  const isUserAuthorizedForProject = useCallback((proj: any, user: any) => {
+    if (!user) return false;
+    if (user.role === 'admin') return true;
+    const isOwner = proj.owner === user.username;
+    const isCreatorByName = user.name && proj.generalInfo?.creatorName === user.name;
+    const isCreatorByUsername = proj.generalInfo?.creatorName === user.username;
+    return isOwner || isCreatorByName || isCreatorByUsername;
+  }, []);
+
   const handleEdit = (proj: any) => {
+    if (!isUserAuthorizedForProject(proj, appUser)) {
+      setDialog({
+        type: 'alert',
+        message: 'คุณไม่มีสิทธิ์เข้าถึงใบงานนี้ (พนักงานสามารถดูและแก้ไขได้เฉพาะใบงานของตนเองเท่านั้น ยกเว้นผู้ดูแลระบบ Admin)',
+      });
+      return;
+    }
     setCurrentProjectId(proj.id);
     const ownerAcc = allAccounts.find(u => u.username === proj.owner);
     let cName = proj.generalInfo?.creatorName;
@@ -395,6 +411,14 @@ const App: React.FC = () => {
 
   const handleDelete = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
+    const targetProj = projectsList.find(p => p.id === id);
+    if (targetProj && !isUserAuthorizedForProject(targetProj, appUser)) {
+      setDialog({ 
+        type: 'alert', 
+        message: 'คุณไม่มีสิทธิ์ลบใบงานนี้ (สามารถลบได้เฉพาะใบงานของตนเองเท่านั้น)', 
+      });
+      return;
+    }
     setDialog({ 
       type: 'confirm', 
       message: 'คุณต้องการลบใบงานนี้ใช่หรือไม่?', 
@@ -554,11 +578,15 @@ const App: React.FC = () => {
       setShowIOSPrintModal(true);
       return;
     }
+    const customer = (generalInfo.customerName || 'ลูกค้า').trim();
+    const originalTitle = document.title;
+    document.title = `ใบสรุปงานติดตั้งผ้าม่าน - ${customer}`;
     try {
       window.print();
     } catch (e) {
       console.error(e);
     }
+    setTimeout(() => { document.title = originalTitle; }, 3000);
   };
 
   const handleSharePDF = async () => {
@@ -567,14 +595,15 @@ const App: React.FC = () => {
       setShowIOSPrintModal(true);
       return;
     }
+    const customer = (generalInfo.customerName || 'ลูกค้า').trim();
     const originalTitle = document.title;
-    document.title = `ใบสรุปงานติดตั้งผ้าม่าน คุณ ${generalInfo.customerName || 'ลูกค้า'}`;
+    document.title = `ใบสรุปงานติดตั้งผ้าม่าน - ${customer}`;
     try {
       window.print();
     } catch (e) {
       console.error(e);
     }
-    setTimeout(() => { document.title = originalTitle; }, 2000);
+    setTimeout(() => { document.title = originalTitle; }, 3000);
   };
 
   const handleOpenInNewTabForPrint = async () => {
@@ -685,17 +714,37 @@ const App: React.FC = () => {
     return `บานที่ ${nums.slice(0, -1).join(', ')} และ ${nums[nums.length - 1]}`;
   };
 
-  const filteredProjects = projectsList.filter(proj => {
+  // Sync document title automatically to ensure any PDF export gets the required name format
+  useEffect(() => {
+    if (view === 'editor' || view === 'ai-preview') {
+      const customer = (generalInfo.customerName || '').trim();
+      document.title = customer ? `ใบสรุปงานติดตั้งผ้าม่าน - ${customer}` : 'ใบสรุปงานติดตั้งผ้าม่าน';
+    } else {
+      document.title = 'Confirmation Form - ใบสรุปงานติดตั้งผ้าม่าน';
+    }
+  }, [view, generalInfo.customerName]);
+
+  const isAdmin = appUser?.role === 'admin';
+
+  // Role-based access: regular employees can only see their own jobs; admin can see all jobs
+  const userAccessibleProjects = projectsList.filter(proj => {
+    if (isAdmin) return true;
+    return isUserAuthorizedForProject(proj, appUser);
+  });
+
+  const filteredProjects = userAccessibleProjects.filter(proj => {
     const q = searchQuery.toLowerCase().trim();
     const cust = (proj.generalInfo?.customerName || '').toLowerCase();
     const loc = (proj.generalInfo?.location || '').toLowerCase();
     const matchSearch = q === '' || cust.includes(q) || loc.includes(q);
 
     let matchEmployee = true;
-    if (filterEmployee === '__mine__') {
-      matchEmployee = proj.owner === appUser?.username;
-    } else if (filterEmployee) {
-      matchEmployee = proj.owner === filterEmployee;
+    if (isAdmin) {
+      if (filterEmployee === '__mine__') {
+        matchEmployee = isUserAuthorizedForProject(proj, appUser);
+      } else if (filterEmployee) {
+        matchEmployee = proj.owner === filterEmployee || proj.generalInfo?.creatorName === filterEmployee;
+      }
     }
     return matchSearch && matchEmployee;
   });
@@ -719,17 +768,19 @@ const App: React.FC = () => {
                   Realtime ซิงค์สด
                 </span>
               </div>
-              <p className="text-sm text-gray-500 mt-1">ระบบจัดการใบงานผ้าม่าน - สวัสดีคุณ <span className="font-bold text-blue-600">{appUser.name || appUser.username}</span> {appUser.role === 'admin' && '(Admin)'}</p>
+              <p className="text-sm text-gray-500 mt-1">ระบบจัดการใบงานผ้าม่าน - สวัสดีคุณ <span className="font-bold text-blue-600">{appUser.name || appUser.username}</span> {isAdmin && '(Admin)'}</p>
             </div>
             <div className="flex flex-wrap gap-2 md:gap-3">
-              {appUser.role === 'admin' && <button onClick={()=>setShowUserMgmt(true)} className="bg-purple-600 text-white px-4 py-2 rounded flex items-center justify-center font-bold hover:bg-purple-700 shadow flex-1 md:flex-none transition-all text-sm h-10"><Users size={16} className="mr-2"/> จัดการพนักงาน</button>}
+              {isAdmin && <button onClick={()=>setShowUserMgmt(true)} className="bg-purple-600 text-white px-4 py-2 rounded flex items-center justify-center font-bold hover:bg-purple-700 shadow flex-1 md:flex-none transition-all text-sm h-10"><Users size={16} className="mr-2"/> จัดการพนักงาน</button>}
               <button onClick={handleLogout} className="bg-red-500 text-white px-4 py-2 rounded flex items-center justify-center font-bold hover:bg-red-600 shadow flex-1 md:flex-none transition-all text-sm h-10"><LogOut size={16} className="mr-2"/> ออกจากระบบ</button>
             </div>
           </div>
 
           <div className="flex flex-col md:flex-row justify-between items-center mb-4 gap-3">
              <div className="flex items-center gap-2 mr-auto w-full md:w-auto">
-               <h2 className="text-xl font-bold text-gray-700 whitespace-nowrap">รายการใบงาน ({filteredProjects.length})</h2>
+               <h2 className="text-xl font-bold text-gray-700 whitespace-nowrap">
+                 {isAdmin ? `รายการใบงานทั้งหมด (${filteredProjects.length})` : `รายการใบงานของฉัน (${filteredProjects.length})`}
+               </h2>
                <span className="inline-flex sm:hidden items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
                  Realtime
@@ -737,11 +788,13 @@ const App: React.FC = () => {
              </div>
              <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
                <input type="text" placeholder="🔍 ค้นหาชื่อลูกค้า / สถานที่..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} className="border border-gray-300 px-3 py-2 rounded-lg text-sm focus:outline-blue-500 shadow-sm w-full sm:w-60 bg-white" />
-               <select value={filterEmployee} onChange={e => setFilterEmployee(e.target.value)} className="border border-gray-300 px-3 py-2 rounded-lg text-sm focus:outline-blue-500 shadow-sm w-full sm:w-auto bg-white h-10">
-                 <option value="">- แสดงทุกใบงาน ({projectsList.length}) -</option>
-                 <option value="__mine__">★ เฉพาะงานของฉัน ({projectsList.filter(p => p.owner === appUser.username).length})</option>
-                 {allAccounts.map(acc => <option key={acc.id} value={acc.username}>ผู้ทำ: {acc.name || acc.username}</option>)}
-               </select>
+               {isAdmin && (
+                 <select value={filterEmployee} onChange={e => setFilterEmployee(e.target.value)} className="border border-gray-300 px-3 py-2 rounded-lg text-sm focus:outline-blue-500 shadow-sm w-full sm:w-auto bg-white h-10">
+                   <option value="">- แสดงทุกใบงาน ({projectsList.length}) -</option>
+                   <option value="__mine__">★ เฉพาะงานของฉัน ({projectsList.filter(p => isUserAuthorizedForProject(p, appUser)).length})</option>
+                   {allAccounts.map(acc => <option key={acc.id} value={acc.username}>ผู้ทำ: {acc.name || acc.username}</option>)}
+                 </select>
+               )}
                <button onClick={handleCreateNew} className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg flex items-center justify-center font-bold shadow-md transition-colors w-full sm:w-auto shrink-0 text-sm h-10"><Plus size={18} className="mr-1.5"/> สร้างใบงาน</button>
              </div>
           </div>
