@@ -68,6 +68,9 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
   const [adminLimits, setAdminLimits] = useState<Record<string, number>>({});
   const [defaultLimit, setDefaultLimit] = useState<number>(20);
   const [savingLimit, setSavingLimit] = useState(false);
+  // Server Gemini API Key configuration status
+  const [geminiKeyConfigured, setGeminiKeyConfigured] = useState<boolean | null>(null);
+  const [showKeyGuideModal, setShowKeyGuideModal] = useState(false);
 
   // Keep live reference to items to strictly prevent stale closure race conditions in async operations
   const itemsRef = React.useRef(items);
@@ -122,7 +125,7 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
     }
   };
 
-  // Fetch quota
+  // Fetch quota and API Key availability
   const fetchQuota = async () => {
     try {
       setLoadingQuota(true);
@@ -140,6 +143,20 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
         if (data.allUsage) {
           setAllUsage(data.allUsage);
         }
+        if (typeof data.geminiKeyConfigured === 'boolean') {
+          setGeminiKeyConfigured(data.geminiKeyConfigured);
+        }
+      } else {
+        // Fallback health check
+        try {
+          const hRes = await fetch('/api/health');
+          const hData = await hRes.json();
+          if (typeof hData?.geminiKeyConfigured === 'boolean') {
+            setGeminiKeyConfigured(hData.geminiKeyConfigured);
+          } else if (typeof hData?.geminiKeyAvailable === 'boolean') {
+            setGeminiKeyConfigured(hData.geminiKeyAvailable);
+          }
+        } catch {}
       }
     } catch (e) {
       console.warn('Could not fetch AI quota:', e);
@@ -169,6 +186,11 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
   const handleGenerate = async (item: CurtainItem) => {
     if (!item.image) {
       setDialog({ type: 'alert', message: 'กรุณาอัปโหลดรูปภาพหน้างานต้นฉบับในหน้าแก้ไขก่อน' });
+      return;
+    }
+
+    if (geminiKeyConfigured === false) {
+      setShowKeyGuideModal(true);
       return;
     }
 
@@ -798,7 +820,15 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
           throw new Error("เซิร์ฟเวอร์ใช้เวลาประมวลผลนานเกินกำหนด (504 Gateway Timeout) กรุณาลองใหม่อีกครั้ง");
         }
         if (responseText.includes("A server error") || res.status >= 500) {
-          throw new Error("เซิร์ฟเวอร์เกิดข้อผิดพลาด (500): กรุณาตรวจสอบว่าได้ตั้งค่า GEMINI_API_KEY ใน Environment Variables ของเซิร์ฟเวอร์/Vercel และกดบันทึกแล้ว");
+          setGeminiKeyConfigured(false);
+          throw new Error(
+            "เซิร์ฟเวอร์เกิดข้อผิดพลาด (500): กรุณาตรวจสอบว่าได้ตั้งค่า GEMINI_API_KEY ใน Environment Variables ของเซิร์ฟเวอร์/Vercel และกดบันทึกแล้ว\n\n" +
+            "📌 ขั้นตอนการแก้ไขบน Vercel:\n" +
+            "1. เข้า Vercel Dashboard > เลือกโปรเจกต์ของคุณ > ไปที่แท็บ Settings > Environment Variables\n" +
+            "2. เพิ่ม Key: GEMINI_API_KEY และใส่ Value เป็น Gemini API Key ของคุณ\n" +
+            "3. เลือกทุกสภาพแวดล้อม (Production, Preview, Development) แล้วกด Save\n" +
+            "4. สำคัญมาก: ไปที่แท็บ Deployments > กดจุดสามจุด (...) ด้านขวาของการ Deploy ล่าสุด > เลือก 'Redeploy' เพื่อให้การตั้งค่ามีผล"
+          );
         }
         throw new Error(`เซิร์ฟเวอร์ตอบกลับผิดรูปแบบ (${res.status}): ${responseText.slice(0, 100)}`);
       }
@@ -812,6 +842,16 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
         }
         if (data?.isQuotaExceeded || data?.error === "GEMINI_QUOTA_EXCEEDED" || res.status === 429) {
           throw new Error("โควต้าโมเดลสร้างรูปภาพ Gemini API เต็ม หรือบัญชีเป็น Free Tier (โมเดลสร้างรูปภาพต้องเปิดใช้งาน Billing/Pay-as-you-go ใน Google AI Studio)");
+        }
+        if (data?.message && (data.message.includes("GEMINI_API_KEY") || data.message.includes("API Key"))) {
+          setGeminiKeyConfigured(false);
+          throw new Error(
+            `${data.message}\n\n` +
+            "📌 วิธีแก้ไขบน Vercel:\n" +
+            "1. เปิด Vercel Dashboard > โปรเจกต์ > Settings > Environment Variables\n" +
+            "2. ใส่ตัวแปร GEMINI_API_KEY แล้วกด Save\n" +
+            "3. ไปที่ Deployments > กดจุดสามจุด (...) > เลือก Redeploy"
+          );
         }
         throw new Error(data?.message || data?.error || 'การสร้างภาพล้มเหลว');
       }
@@ -863,6 +903,10 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
 
   // Batch generate
   const handleBatchGenerate = async () => {
+    if (geminiKeyConfigured === false) {
+      setShowKeyGuideModal(true);
+      return;
+    }
     const targets = items.filter(i => selectedIds.has(i.id) && i.image);
     if (targets.length === 0) {
       setDialog({ type: 'alert', message: 'กรุณาเลือกหน้าที่ต้องการสร้างรูปและมีรูปต้นฉบับ' });
@@ -1213,6 +1257,24 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
             </button>
           </div>
         </div>
+
+        {/* Warning Banner if GEMINI_API_KEY is not configured on server */}
+        {geminiKeyConfigured === false && (
+          <div className="bg-amber-50 border-t border-b border-amber-300 px-4 py-2.5">
+            <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-2 text-xs">
+              <div className="flex items-center gap-2 text-amber-900 font-semibold">
+                <AlertCircle size={16} className="text-amber-600 shrink-0" />
+                <span>⚠️ ระบบตรวจพบว่ายังไม่ได้ตั้งค่า GEMINI_API_KEY บนเซิร์ฟเวอร์/Vercel (จำเป็นสำหรับการสร้างรูปภาพ AI)</span>
+              </div>
+              <button
+                onClick={() => setShowKeyGuideModal(true)}
+                className="bg-amber-600 hover:bg-amber-700 text-white font-bold px-3 py-1 rounded shadow-xs transition-colors"
+              >
+                ดูวิธีตั้งค่า API Key
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Multi-page selection & batch bar */}
         <div className="bg-gray-50 border-t border-gray-200 px-4 py-2.5">
@@ -2095,6 +2157,90 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
                 className="bg-gray-200 hover:bg-gray-300 text-gray-700 font-bold px-4 py-2 rounded-lg text-sm"
               >
                 ปิดหน้าต่าง
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Gemini API Key Guide Modal */}
+      {showKeyGuideModal && (
+        <div className="fixed inset-0 bg-black/60 z-[999999] flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl max-w-lg w-full shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            <div className="p-5 border-b border-gray-100 flex items-center justify-between bg-amber-50">
+              <div className="flex items-center gap-2 text-amber-900 font-extrabold text-base">
+                <AlertCircle size={20} className="text-amber-600" />
+                <span>วิธีตั้งค่า GEMINI_API_KEY บน Vercel และ Server</span>
+              </div>
+              <button
+                onClick={() => setShowKeyGuideModal(false)}
+                className="text-gray-400 hover:text-gray-600 p-1 rounded-full hover:bg-amber-100 transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4 max-h-[75vh] overflow-y-auto text-sm text-gray-700 leading-relaxed">
+              <div className="bg-amber-50/80 border border-amber-200 rounded-lg p-3.5 text-xs text-amber-900">
+                ฟังก์ชันสร้างภาพผ้าม่านด้วย AI ทำงานผ่าน <strong>Google Gemini API</strong> บนเซิร์ฟเวอร์ เพื่อความปลอดภัยของข้อมูล จึงต้องมี API Key ในระบบ
+              </div>
+
+              <div>
+                <h4 className="font-bold text-gray-900 text-sm mb-2 flex items-center gap-1.5">
+                  <span className="w-5 h-5 rounded-full bg-blue-600 text-white text-xs flex items-center justify-center font-bold">1</span>
+                  รับ Gemini API Key
+                </h4>
+                <p className="text-xs text-gray-600 ml-6">
+                  เข้าเว็บไซต์ <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer" className="text-blue-600 underline font-semibold">Google AI Studio (aistudio.google.com/apikey)</a> แล้วกด <strong>Create API key</strong>
+                </p>
+              </div>
+
+              <div className="border-t border-gray-100 pt-3">
+                <h4 className="font-bold text-gray-900 text-sm mb-2 flex items-center gap-1.5">
+                  <span className="w-5 h-5 rounded-full bg-black text-white text-xs flex items-center justify-center font-bold">2</span>
+                  ตั้งค่าบน Vercel (หากดีพลอยบน Vercel)
+                </h4>
+                <ol className="list-decimal list-inside text-xs text-gray-600 ml-2 space-y-1.5">
+                  <li>เปิด <strong>Vercel Dashboard</strong> แล้วเลือกโปรเจกต์ของคุณ</li>
+                  <li>ไปที่เมนู <strong>Settings</strong> &gt; <strong>Environment Variables</strong></li>
+                  <li>
+                    ตั้งชื่อตัวแปร (Key): <code className="bg-gray-100 text-purple-700 font-mono px-1 py-0.5 rounded font-bold">GEMINI_API_KEY</code>
+                  </li>
+                  <li>วาง API Key ที่ได้มาในช่อง Value</li>
+                  <li>เลือกทุกช่อง (Production, Preview, Development) แล้วกด <strong>Save</strong></li>
+                  <li className="text-red-700 font-bold bg-red-50 p-1.5 rounded border border-red-200 mt-1">
+                    ⚠️ สำคัญมาก: ไปที่แท็บ <strong>Deployments</strong> &gt; กดจุดสามจุด (...) ที่รายการล่าสุด &gt; เลือก <strong>Redeploy</strong> เพื่อให้ Vercel โหลดค่าตัวแปรใหม่!
+                  </li>
+                </ol>
+              </div>
+
+              <div className="border-t border-gray-100 pt-3">
+                <h4 className="font-bold text-gray-900 text-sm mb-2 flex items-center gap-1.5">
+                  <span className="w-5 h-5 rounded-full bg-gray-600 text-white text-xs flex items-center justify-center font-bold">3</span>
+                  สำหรับ Google AI Studio หรือ Server ทั่วไป
+                </h4>
+                <p className="text-xs text-gray-600 ml-6">
+                  ใน AI Studio ให้ตรวจสอบที่ Settings &gt; Secrets หรือในเซิร์ฟเวอร์ให้กำหนดในไฟล์ <code className="bg-gray-100 font-mono px-1 py-0.5 rounded">.env</code> ชื่อ <code className="font-bold">GEMINI_API_KEY=...</code>
+                </p>
+              </div>
+            </div>
+
+            <div className="p-4 bg-gray-50 border-t border-gray-200 flex items-center justify-between gap-3">
+              <button
+                onClick={() => {
+                  fetchQuota();
+                }}
+                disabled={loadingQuota}
+                className="flex items-center gap-1.5 bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 font-bold px-3.5 py-2 rounded-lg text-xs transition-colors"
+              >
+                <RefreshCw size={13} className={loadingQuota ? 'animate-spin' : ''} />
+                <span>{loadingQuota ? 'กำลังตรวจสอบ...' : 'ตรวจสอบการเชื่อมต่อใหม่'}</span>
+              </button>
+              <button
+                onClick={() => setShowKeyGuideModal(false)}
+                className="bg-gray-800 hover:bg-gray-900 text-white font-bold px-4 py-2 rounded-lg text-xs shadow transition-colors"
+              >
+                เข้าใจแล้ว / ปิดหน้าต่าง
               </button>
             </div>
           </div>

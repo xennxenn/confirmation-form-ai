@@ -5,7 +5,9 @@
   },
   "usage": {
     "2026-09": {
-      "anonymous": 1
+      "anonymous": 2,
+      "Admin": 5,
+      "test": 1
     }
   }
 }

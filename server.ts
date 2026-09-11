@@ -174,13 +174,25 @@ app.use((req, res, next) => {
 
 // Body parser with 50MB limit for image uploads (guard against re-parsing in Vercel)
 app.use((req, res, next) => {
-  if (req.body && typeof req.body === "object") {
-    return next();
+  if (req.body) {
+    if (Buffer.isBuffer(req.body)) {
+      try {
+        req.body = JSON.parse(req.body.toString("utf-8"));
+        return next();
+      } catch {}
+    } else if (typeof req.body === "string") {
+      try {
+        req.body = JSON.parse(req.body);
+        return next();
+      } catch {}
+    } else if (typeof req.body === "object" && !Array.isArray(req.body)) {
+      return next();
+    }
   }
   express.json({ limit: "50mb" })(req, res, next);
 });
 app.use((req, res, next) => {
-  if (req.body && typeof req.body === "object") {
+  if (req.body && typeof req.body === "object" && !Array.isArray(req.body) && !Buffer.isBuffer(req.body)) {
     return next();
   }
   express.urlencoded({ extended: true, limit: "50mb" })(req, res, next);
@@ -191,7 +203,12 @@ const apiRouter = express.Router();
 
 // Health check
 const healthHandler = (_req: express.Request, res: express.Response) => {
-  res.json({ status: "ok", geminiKeyAvailable: !!process.env.GEMINI_API_KEY });
+  const hasKey = !!getApiKey();
+  res.json({
+    status: "ok",
+    geminiKeyAvailable: hasKey,
+    geminiKeyConfigured: hasKey,
+  });
 };
 apiRouter.get("/health", healthHandler);
 app.get("/health", healthHandler);
@@ -206,6 +223,7 @@ const aiQuotaHandler = (req: express.Request, res: express.Response) => {
     const userLimit = store.monthlyLimits[username] ?? store.defaultMonthlyLimit ?? 20;
     const userUsage = store.usage[month]?.[username] ?? 0;
     const remaining = Math.max(0, userLimit - userUsage);
+    const hasKey = !!getApiKey();
 
     res.json({
       success: true,
@@ -217,9 +235,10 @@ const aiQuotaHandler = (req: express.Request, res: express.Response) => {
       defaultLimit: store.defaultMonthlyLimit ?? 20,
       monthlyLimits: store.monthlyLimits,
       allUsage: store.usage[month] || {},
+      geminiKeyConfigured: hasKey,
     });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: err.message, geminiKeyConfigured: !!getApiKey() });
   }
 };
 apiRouter.get("/ai-quota", aiQuotaHandler);
@@ -414,21 +433,21 @@ const generateCurtainHandler = async (req: express.Request, res: express.Respons
       text: prompt,
     });
 
-    // Generate image: try gemini-3.1-flash-image first, fallback to gemini-3.1-flash-lite-image
+    // Generate image: try gemini-3.1-flash-lite-image first (fastest, standard image model), fallback to gemini-3.1-flash-image
     let response: any = null;
     let lastErr: any = null;
     try {
       response = await ai.models.generateContent({
-        model: "gemini-3.1-flash-image",
+        model: "gemini-3.1-flash-lite-image",
         contents: { parts },
         config: generateConfig,
       });
     } catch (errFirst: any) {
       lastErr = errFirst;
-      console.warn("Primary model gemini-3.1-flash-image error, attempting fallback model:", errFirst?.message || errFirst);
+      console.warn("Primary model gemini-3.1-flash-lite-image error, attempting secondary model gemini-3.1-flash-image:", errFirst?.message || errFirst);
       try {
         response = await ai.models.generateContent({
-          model: "gemini-3.1-flash-lite-image",
+          model: "gemini-3.1-flash-image",
           contents: { parts },
           config: generateConfig,
         });
@@ -460,17 +479,21 @@ const generateCurtainHandler = async (req: express.Request, res: express.Respons
       });
     }
 
-    // Automatically upload the base64 image to Cloudinary to provide a permanent, lightweight HTTPS URL
+    // Automatically upload the base64 image to Cloudinary to provide a permanent, lightweight HTTPS URL (with 6s timeout guard)
     let finalImageUrl = generatedImageUrl;
     try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 6000);
       const cRes = await fetch("https://api.cloudinary.com/v1_1/dsxpwfujb/image/upload", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
         body: JSON.stringify({
           file: generatedImageUrl,
           upload_preset: "ml_default",
         }),
       });
+      clearTimeout(timer);
       if (cRes.ok) {
         const cData: any = await cRes.json();
         if (cData?.secure_url) {

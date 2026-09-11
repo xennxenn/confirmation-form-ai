@@ -1,12 +1,12 @@
 import type { Request, Response } from "express";
 import app from "../server";
 
-export default function handler(req: Request, res: Response) {
+export default async function handler(req: Request, res: Response): Promise<void> {
   try {
     const urlObj = new URL(req.url || "/", "http://localhost");
-    const routeParam = urlObj.searchParams.get("__route");
+    const routeParam = urlObj.searchParams.get("__route") || (req.query as any)?.__route;
 
-    if (routeParam) {
+    if (routeParam && typeof routeParam === "string") {
       const cleanParam = routeParam.replace(/^\/+/, "");
       req.url = `/api/${cleanParam}`;
     } else {
@@ -25,5 +25,28 @@ export default function handler(req: Request, res: Response) {
     console.warn("Vercel handler URL normalization warning:", e);
   }
 
-  return app(req, res);
+  return new Promise<void>((resolve) => {
+    let resolved = false;
+    const finish = () => {
+      if (!resolved) {
+        resolved = true;
+        resolve();
+      }
+    };
+    res.on("finish", finish);
+    res.on("close", finish);
+
+    try {
+      app(req, res);
+    } catch (handlerErr: any) {
+      console.error("Vercel Express invocation error:", handlerErr);
+      if (!res.headersSent) {
+        res.status(500).json({
+          error: "INTERNAL_SERVER_ERROR",
+          message: handlerErr?.message || "เกิดข้อผิดพลาดในการประมวลผลบนเซิร์ฟเวอร์",
+        });
+      }
+      finish();
+    }
+  });
 }
