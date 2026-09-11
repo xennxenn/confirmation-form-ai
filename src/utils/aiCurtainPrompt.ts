@@ -191,8 +191,8 @@ export function mapCurtainStyleRule(styleName: string, hangStyle: string = ''): 
   if (s.includes('ม่านปรับแสง')) {
     return 'Vertical blinds with uniform vertical fabric louvers hanging straight';
   }
-  if (s.includes('ม่านเจาะห่วง')) {
-    return 'Grommet Curtains with round metal eyelet rings threaded onto a visible drapery rod';
+  if (s.includes('ม่านเจาะห่วง') || s.toLowerCase().includes('grommet') || s.toLowerCase().includes('eyelet')) {
+    return 'Grommet / Eyelet Curtains (ม่านเจาะห่วง) featuring prominent circular metal grommet rings punched into the reinforced top fabric heading, visibly sliding along an exposed decorative curtain pole (such as a 19mm titanium or metal rod). Deep sinusoidal S-curve folds cascade directly from the rings. ABSOLUTELY NO PINCH PLEATS, NO 3-FINGER PLEATS, NO CONCEALED TRACKS!';
   }
   if (s.includes('ม่านห่วงคล้อง')) {
     return 'Tab top curtains with fabric loop straps hung over a curtain pole';
@@ -234,6 +234,9 @@ export function buildCurtainAiPrompt(specs: CurtainPromptSpecs): string {
   const isRoman = rawStyle1.includes('ม่านพับ') && !rawStyle1.includes('ม่านจีบ') && !rawStyle1.includes('ม่านลอน');
   const isVerticalBlind = rawStyle1.includes('ม่านปรับแสง');
   const isBlindOrShade = isVenetian || isRoller || isRoman || isVerticalBlind;
+  const isGrommet = rawStyle1.includes('เจาะห่วง') || rawStyle1.toLowerCase().includes('grommet') || rawStyle1.toLowerCase().includes('eyelet');
+  const isRippleFold = (rawStyle1.includes('ม่านลอน') || rawStyle1.includes('ลอนเทป') || rawStyle1.toLowerCase().includes('ripple') || rawStyle1.toLowerCase().includes('s-fold')) && !isGrommet;
+  const isPinchPleat = (rawStyle1.includes('ม่านจีบ') || rawStyle1.toLowerCase().includes('pinch')) && !isGrommet && !isRippleFold;
 
   // Venetian Blinds with Fabric Ladder Tape detection
   const isVenetianWithTape = isVenetian && (
@@ -553,12 +556,62 @@ DUAL-TRACK TWO-LAYER CURTAIN SYSTEM:
    - NOTE: The front and rear layers have DIFFERENT styles as defined above. Do NOT render them identically!
 `;
   } else {
-    layerArchitecture = `
+    if (isGrommet) {
+      layerArchitecture = `
+======================================================================
+CRITICAL STYLE MANDATE: 100% GROMMET / EYELET CURTAINS (ม่านเจาะห่วง)
+======================================================================
+1. HEADING STYLE & CONSTRUCTION:
+   - This curtain is 100% GROMMET / EYELET CURTAIN (ม่านเจาะห่วง).
+   - Large circular metallic grommet/eyelet rings (ห่วงตาไก่โลหะ) are punched directly through the reinforced fabric heading band at regular intervals.
+   - The decorative cylindrical curtain pole (exposed 19mm titanium or metal drapery pole) passes directly THROUGH every single grommet ring!
+   - The metallic grommet rings MUST BE CLEARLY VISIBLE spaced along the exposed curtain pole.
+   - The fabric naturally forms deep, soft S-curve cylindrical folds cascading down directly from the rings on the pole.
+   - The top edge of the fabric (ruffle header) stands up only approx 2.5 to 3 cm above the top of the rod.
+2. DRAW ACTION:
+   - ${action1En}
+3. ABSOLUTE HARD NEGATIVE RESTRICTIONS (FATAL DEFECT IF VIOLATED):
+   - ABSOLUTELY NO PINCH PLEATS (ห้ามใส่จีบม่าน หรือจีบ 3 จีบเด็ดขาด)!
+   - ABSOLUTELY NO TRIPLE-FINGER PLEATS OR HEADING TAPE!
+   - ABSOLUTELY NO CURTAIN HOOKS OR SLIDERS!
+   - ABSOLUTELY NO CONCEALED TRACKS, PELMET BOXES, CASSETTES, OR CORNICES!
+   - The decorative cylindrical pole and its wall brackets MUST BE FULLY EXPOSED.
+======================================================================
+`;
+    } else if (isRippleFold) {
+      layerArchitecture = `
+======================================================================
+CRITICAL STYLE MANDATE: 100% RIPPLE FOLD / S-FOLD CURTAINS (ม่านลอน)
+======================================================================
+1. HEADING STYLE & CONSTRUCTION:
+   - This curtain is 100% RIPPLE FOLD / S-FOLD CURTAINS (ม่านลอน).
+   - Uniform, continuous, unbroken sinusoidal S-curve waves flowing smoothly from the top track down to the hem with equal wave spacing.
+2. ABSOLUTE HARD NEGATIVE RESTRICTIONS:
+   - ABSOLUTELY NO PINCH PLEATS! NO 3-FINGER PLEATS!
+   - ABSOLUTELY NO GROMMET RINGS!
+======================================================================
+`;
+    } else if (isPinchPleat) {
+      layerArchitecture = `
+======================================================================
+CRITICAL STYLE MANDATE: 100% PINCH PLEAT CURTAINS (ม่านจีบ 3 จีบ)
+======================================================================
+1. HEADING STYLE & CONSTRUCTION:
+   - This curtain is 100% PINCH PLEAT CURTAINS (ม่านจีบ).
+   - Distinct, crisp 3-finger triple pinch pleats (จีบ 3 แฉก) neatly folded and stitched at regular intervals along the header tape.
+2. ABSOLUTE HARD NEGATIVE RESTRICTIONS:
+   - ABSOLUTELY NO GROMMET RINGS! NO EYELET HOLES!
+   - ABSOLUTELY NO RIPPLE WAVE TAPE!
+======================================================================
+`;
+    } else {
+      layerArchitecture = `
 SINGLE-LAYER CURTAIN SYSTEM:
 - Style: ${style1En}
 - Draw Style: ${action1En}
 - Single track installation without any sheer underlayer.
 `;
+    }
   }
 
   // Venetian Blinds with Fabric Ladder Tape
@@ -659,6 +712,8 @@ MANDATORY BLIND DROP EXTENSION / MASK PROPORTION (100% FULLY CLOSED):
         trackDescription = 'Track: Specialized Ripple-fold / S-Fold drapery track with interconnected wheeled carriers ensuring perfectly uniform wave spacing.';
       } else if (specs.track.includes('รางไมโคร') || specs.track.includes('รางตัวซี') || specs.track.includes('รางอลูมิเนียม')) {
         trackDescription = 'Track: Low-profile slim white aluminum architectural drapery track.';
+      } else if (specs.track.includes('ไทเทเนียม') || specs.track.includes('19')) {
+        trackDescription = 'Track: Decorative 19mm cylindrical curtain pole in sleek titanium finish (รางโชว์ไทเทเนียม 19 มม.) with wall-mounted brackets and matching finials.';
       } else if (specs.track.includes('รางโชว์') || specs.track.includes('ห่วง')) {
         trackDescription = 'Track: Decorative cylindrical curtain pole / rod with matching end finials.';
       } else if (specs.track && specs.track !== '-') {
@@ -666,7 +721,9 @@ MANDATORY BLIND DROP EXTENSION / MASK PROPORTION (100% FULLY CLOSED):
       }
     }
 
-    if (specs.hangStyle) {
+    if (isGrommet) {
+      hangDescription = 'Heading: GROMMET / EYELET HEADERS (ม่านเจาะห่วง). Round metallic eyelet grommet rings punched into the reinforced fabric top, sliding along the exposed decorative curtain pole. The pole passes through the grommet rings with wall-mount brackets. ABSOLUTELY NO PINCH PLEATS!';
+    } else if (specs.hangStyle) {
       if (specs.hangStyle.includes('หลุมฝ้า') || specs.hangStyle.includes('หลุม') || (specs.hangStyle.includes('ใต้ราง') && specs.hangStyle.includes('บังราง'))) {
         hangDescription = 'Heading: Recessed ceiling pocket / pelmet installation (หลุมฝ้า/บังราง). The curtain track is mounted inside the recessed ceiling pocket, and the top headings of the curtains emerge neatly from the ceiling pocket/recess.';
       } else if (specs.hangStyle.includes('ปิดราง') || specs.hangStyle.includes('บังราง')) {
@@ -738,10 +795,10 @@ MANDATORY BLIND DROP EXTENSION / MASK PROPORTION (100% FULLY CLOSED):
       hemDescription = 'Bottom hem (ระยะชายม่าน): MUST precisely touch the floor surface (kissing the floor) without excessive pooling.';
     } else if (mb.includes('บัว') || mb.includes('เสมอขอบบัว')) {
       hemDescription = 'Bottom hem (ระยะชายม่าน): MUST terminate precisely at the top edge of the floor skirting / baseboard.';
-    } else if (mb.includes('หน้าต่าง') || mb.includes('ขอบล่าง')) {
-      hemDescription = 'Bottom hem (ระยะชายม่าน): MUST terminate 10-15 cm below the window sill.';
+    } else if (mb.includes('หน้าต่าง') || mb.includes('ขอบล่าง') || mb.includes('บวกเพิ่ม')) {
+      hemDescription = `Bottom hem (ระยะชายม่าน): MUST terminate PRECISELY at the bottom boundary of the designated area (${mb}). This is a floating hem ending in mid-air above the floor. Absolutely DO NOT extend or drag curtains down to the floor!`;
     } else if (mb && mb !== '-') {
-      hemDescription = `Bottom hem (ระยะชายม่าน): ${mb}.`;
+      hemDescription = `Bottom hem (ระยะชายม่าน): Terminate PRECISELY at the bottom boundary of the designated area (${mb}).`;
     }
   }
 
@@ -903,11 +960,12 @@ GUIDE IMAGE REFERENCE & SPECIFICATION COMPLIANCE (ยึดตามที่ก
   * CENTER-SPLIT (แยกกลาง 2 ผืน): Curtains are gathered on the left and right inside the red boundary.
   `}
   `}
-- STRICT BOUNDARY ENFORCEMENT (ผ้าม่านต้องอยู่ในกรอบพื้นที่ผ้าม่านไม่ขาด ไม่เกิน):
+- STRICT BOUNDARY & HEIGHT ENFORCEMENT (ผ้าม่านต้องอยู่ในกรอบพื้นที่ผ้าม่านไม่ขาด ไม่เกิน):
   * The curtains MUST be installed 100% STRICTLY WITHIN THIS DESIGNATED POLYGON BOUNDARY.
   * DO NOT spill over or install any curtain fabric outside this red boundary!
-  * Top: Curtains hang cleanly from the top edge (หลุมฝ้า/เพดาน).
-  * Bottom: Curtains hang down to the bottom boundary (hovering 1-2 cm above the floor as specified).
+  * Top Track Mounting Level: Curtains hang starting PRECISELY at the top boundary edge. DO NOT move the track up to the ceiling if the boundary starts lower on the wall! Keep any wall above the boundary bare and untouched.
+  * Bottom Hem Line: Curtains hang down and terminate PRECISELY at the bottom boundary edge. DO NOT extend down to the floor if the boundary stops in mid-air above the floor! DO NOT cut short above the window sill if the boundary extends below the sill!
+  * Foreground Objects & 3D Depth: If kitchen counters, appliances, dish racks, baby walkers, cribs, chairs, or furniture are in front of the window within this boundary, the curtain MUST hang down in 3D space BEHIND those objects down to the bottom boundary line, while keeping all foreground items 100% visible and intact in front.
 ======================================================================
 `;
   }
@@ -930,6 +988,10 @@ The multi-sided corner/bay installation zone spans within:
 Remember: Curtains follow the continuous curved track across the designated alcove within these bounds.
 `;
     } else {
+      const isFloatingHem = (mb.includes('บวกเพิ่ม') || mb.includes('ลอย') || mb.includes('ขอบล่าง') || mb.includes('หน้าต่าง')) || (maxY < 88);
+      const isWallMounted = (!specs.marginTop?.includes('เพดาน') && !specs.marginTop?.includes('ฝ้า')) && (minY > 6);
+      const isLeftFlush = specs.marginLeft?.includes('พอดีเฟรม') || specs.marginLeft?.includes('เฟรม');
+
       boundarySection = `
 =====================================================
 EXACT BOUNDARY RESTRICTION (ผ้าม่านต้องอยู่ในกรอบพื้นที่ผ้าม่านไม่ขาด ไม่เกิน):
@@ -937,13 +999,41 @@ EXACT BOUNDARY RESTRICTION (ผ้าม่านต้องอยู่ใน�
 The user has designated the exact target window frame coordinates on this photograph:
 - Left Edge: ${minX.toFixed(1)}% of total image width
 - Right Edge: ${maxX.toFixed(1)}% of total image width
-- Top Edge: ${minY.toFixed(1)}% of total image height
-- Bottom Edge: ${maxY.toFixed(1)}% of total image height
+- Top Track Mounting Level: ${minY.toFixed(1)}% of total image height
+- Bottom Hem Line: ${maxY.toFixed(1)}% of total image height
 
-CRITICAL BOUNDARY ENFORCEMENT:
-1. STRICT BOUNDARY (ไม่ขาด ไม่เกิน): Curtains must be strictly confined within X: [${minX.toFixed(1)}% - ${maxX.toFixed(1)}%] and Y: [${minY.toFixed(1)}% - ${maxY.toFixed(1)}%].
-2. ZERO OVERFLOW ONTO ADJACENT WALLS: The curtain fabric, track, and hardware MUST NOT spill over beyond ${minX.toFixed(1)}% on the left or ${maxX.toFixed(1)}% on the right onto adjacent perpendicular walls, wall moldings, or columns.
-3. Keep all wall and ceiling surfaces outside [Left ${minX.toFixed(1)}% to Right ${maxX.toFixed(1)}%] 100% clean and identical to the original room photo.
+CRITICAL BOUNDARY & VERTICAL POSITION ENFORCEMENT (ยึดตามขนาดกรอบพื้นที่ผ้าม่านเป๊ะ 100%):
+1. MANDATORY ROOM PRESERVATION (คงต้นฉบับห้องเดิมไว้ 100% ไม่เปลี่ยนแปลงเฟอร์นิเจอร์หรือของตกแต่ง):
+   - Every element of this room outside the window area MUST BE PRESERVED with 100% fidelity: the wall artwork / picture frame on the left, the floor lamp, the armchair, the crib and canopy on the right, and the wooden floor.
+   - DO NOT re-render, distort, or hallucinate the room. Only replace the window curtains.
+
+2. TOP ROD / TRACK MOUNTING LEVEL (ตำแหน่งติดตั้งรางม่าน - รางติดผนังเหนือวงกบ 20 ซม.):
+   - The curtain rod/track MUST be mounted PRECISELY at Y = ${minY.toFixed(1)}% of the image height${specs.marginTop ? ` (${specs.marginTop})` : ''}.
+${isWallMounted ? `   - *** WALL-MOUNTED ROD (รางติดผนัง) ***
+   - The new curtain pole is anchored directly into the plaster wall at Y = ${minY.toFixed(1)}% (approx 20 cm above the window frame).
+   - The wall section above this new rod (between Y = ${minY.toFixed(1)}% and the ceiling) MUST BE CLEAN, BARE PAINTED WALL matching the room's paint!
+   - ABSOLUTELY DO NOT mount the rod near the ceiling!` : `   - ABSOLUTELY DO NOT move the rod away from Y = ${minY.toFixed(1)}%!`}
+
+3. EXACT BOTTOM HEM TERMINATION (ระยะชายม่านด้านล่าง ต้องไม่ขาด ไม่เกิน - ห้ามลากลงพื้นเด็ดขาด!):
+   - The curtain fabric hem MUST terminate PRECISELY at Y = ${maxY.toFixed(1)}% of the image height${mb ? ` (${mb})` : ''}.
+${isFloatingHem ? `   - *** CRITICAL ARCHITECTURAL CONSTRAINT: FLOATING MID-WALL CURTAIN (ม่านลอยครึ่งผนัง) ***
+   - The curtain stops cleanly in mid-air at Y = ${maxY.toFixed(1)}% (approx 40 cm below the window sill, roughly level with the armchair armrest).
+   - *** ABSOLUTELY DO NOT EXTEND THE CURTAIN DOWN TO TOUCH OR HOVER NEAR THE FLOOR! ***
+   - The entire wall area, baseboard, and wood flooring below Y = ${maxY.toFixed(1)}% down to the bottom of the photo MUST REMAIN 100% BARE, FULLY EXPOSED, AND UNTOUCHED!
+   - Letting curtains touch or pool on the floor is a FATAL DEFECT.` : `   - ABSOLUTELY DO NOT let curtains drag or bunch on the floor!`}
+
+4. FOREGROUND OBJECT OCCLUSION & 3D DEPTH LAYERING (การบังของสิ่งของด้านหน้าผ้าม่าน):
+   - Real rooms often have items in front of the window (e.g. baby walkers, cribs, chairs, armchairs, kitchen counters, appliances, sterilizers, dish racks, shelves, furniture).
+   - If the curtain boundary extends behind or below any foreground item:
+     * THE CURTAIN MUST HANG IN 3D SPACE BEHIND THOSE FOREGROUND OBJECTS, FULLY EXTENDING FROM TOP (Y = ${minY.toFixed(1)}%) DOWN TO THE BOTTOM HEM LINE (Y = ${maxY.toFixed(1)}%).
+     * DO NOT cut the curtain short or stop it above foreground objects!
+     * The foreground objects (such as the armchair and baby crib) MUST REMAIN 100% INTACT, CRISP, AND UNCHANGED in front of the curtains.
+
+5. HORIZONTAL BOUNDARIES (ความกว้างซ้าย-ขวา):
+   - Left Edge: Exactly ${minX.toFixed(1)}% of image width.
+${isLeftFlush ? `     * *** FLUSH WITH LEFT WINDOW FRAME (พอดีเฟรม) ***: The left curtain panel stack MUST NOT extend leftward past the window frame onto the bare wall behind the armchair or artwork!` : `     * Aligns strictly at X = ${minX.toFixed(1)}%.`}
+   - Right Edge: Exactly ${maxX.toFixed(1)}% of image width (extends approx 25 cm past the right window frame onto the wall, stopping neatly before the crib).
+   - ZERO overflow onto adjacent side walls, side moldings, or columns.
 `;
     }
   }
@@ -957,6 +1047,12 @@ CRITICAL BOUNDARY ENFORCEMENT:
     productIntro = 'Carefully perform an architectural inpainting operation on the provided room photograph to realistically install custom ROMAN SHADES (ม่านพับ).';
   } else if (isVerticalBlind) {
     productIntro = 'Carefully perform an architectural inpainting operation on the provided room photograph to realistically install custom VERTICAL BLINDS (ม่านปรับแสง).';
+  } else if (isGrommet) {
+    productIntro = 'Carefully perform an architectural inpainting operation on the provided room photograph to realistically install custom GROMMET / EYELET CURTAINS (ม่านเจาะห่วง) on an exposed decorative titanium curtain pole. DO NOT generate pinch pleats!';
+  } else if (isRippleFold) {
+    productIntro = 'Carefully perform an architectural inpainting operation on the provided room photograph to realistically install custom RIPPLE FOLD / S-FOLD CURTAINS (ม่านลอน). DO NOT generate pinch pleats!';
+  } else if (isPinchPleat) {
+    productIntro = 'Carefully perform an architectural inpainting operation on the provided room photograph to realistically install custom PINCH PLEAT CURTAINS (ม่านจีบ 3 จีบ). DO NOT generate grommet eyelets!';
   }
 
   return `
@@ -990,19 +1086,35 @@ ${rollerOpacitySection}
 
 ${layerArchitecture}
 
+CRITICAL 3D DEPTH & FOREGROUND OBJECT PRESERVATION:
+- Real rooms frequently contain foreground objects in front of the window (such as kitchen counters, dish drying racks, sterilizers, appliances, baby walkers, baby cribs, chairs, sofas, headboards, desks, lamps, or shelves).
+- When the curtain boundary extends behind or below any foreground object:
+  * Curtains MUST hang in 3D depth space BEHIND those objects down to the designated bottom hem boundary.
+  * Curtains MUST NEVER be cut off or stopped above foreground objects.
+  * All foreground objects MUST remain 100% visible, crisp, and intact in the foreground.
+
 FABRIC & COLOR SPECIFICATIONS:
 ${fabricDescription || '- Premium drapery fabric with rich authentic texture and natural soft folds.'}
 
 MOUNTING & TAILORING:
 - Track: ${trackDescription} ${hangDescription} ${bracketDescription}
-- Margins & Hem: ${hemDescription || 'Cleanly tailored hem hovering just above the floor.'}${marginDetails}
+- Margins & Hem: ${hemDescription || 'Cleanly tailored hem terminating strictly at the bottom polygon boundary.'}${marginDetails}
 - Room Position: ${specs.roomPos || 'Interior room window'}
 ${specs.width && specs.height ? `- Specified dimensions: Width ${specs.width} cm, Height ${specs.height} cm.` : ''}
 
 ${accessoriesSection}
 
-OUTPUT QUALITY:
-- 8K architectural interior photography finish.
-- Natural fabric weight, ambient drop shadows under folds, and realistic light diffusion through the window.
+OUTPUT QUALITY & ARCHITECTURAL REALISM (เน้นความสมจริงและตามแบบที่กำหนด - แก้ไขภาพที่ดูลอย ไม่เนียน):
+1. SEAMLESS PHYSICAL ANCHORING & CONTACT SHADOWS:
+   - Curtains must look 100% physically installed in this real room, NOT like a flat sticker or disconnected CGI overlay!
+   - Cast soft, subtle contact drop shadows and ambient occlusion behind the mounting brackets, behind the curtain rod, and behind the deep fabric folds onto the wall.
+   - Natural illumination: Daylight entering from the window must naturally cast light across the fabric folds, creating authentic highlight contours, rim lighting along leading fabric edges, and soft shadow falloff in the fold valleys.
+2. ORGANIC TEXTILE FABRIC DRAPE:
+   - Render natural fabric weight, gentle gravitational drape, and authentic textile weave matching Reference Swatch 1 (${specs.fabricName1 || 'PLENARY'} / ${specs.fabricColor1 || 'CREAM'}).
+   - Authentic tailored double-folded bottom hem with neat stitching.
+   - Fabric must have natural surface texture and sheen—NO blown-out flat white surfaces, NO synthetic plastic sheen.
+3. HARDWARE REALISM:
+   - The decorative curtain pole (such as 19mm titanium pole) has an authentic satin metallic texture with wall-mounting bracket anchors and matching finials.
+   - Eyelet rings or track carriers are physically linked to the fabric and rod/track with authentic mechanical precision.
 `.trim();
 }

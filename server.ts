@@ -130,10 +130,34 @@ export const app = express();
 
 // Restore original path if Vercel altered req.url during rewrite
 app.use((req, _res, next) => {
-  const matchedPath = (req.headers["x-matched-path"] || req.headers["x-now-route-matches"] || "") as string;
-  if (matchedPath && matchedPath.startsWith("/api")) {
-    req.url = matchedPath;
+  const queryRoute = (req.query as any)?.__route;
+  if (queryRoute && typeof queryRoute === "string") {
+    req.url = `/api/${queryRoute.replace(/^\/+/, "")}`;
+    return next();
   }
+
+  const routeMatches = (req.headers["x-now-route-matches"] || "") as string;
+  if (routeMatches) {
+    const m = routeMatches.match(/(?:^|&)1=([^&]+)/);
+    if (m && m[1]) {
+      const captured = decodeURIComponent(m[1]).replace(/^\/+/, "");
+      req.url = `/api/${captured}`;
+      return next();
+    }
+  }
+
+  const matchedPath = (req.headers["x-matched-path"] || "") as string;
+  if (matchedPath && matchedPath.startsWith("/api") && matchedPath !== "/api") {
+    req.url = matchedPath;
+    return next();
+  }
+
+  const fwdUrl = (req.headers["x-forwarded-url"] || req.headers["x-original-url"] || "") as string;
+  if (fwdUrl && fwdUrl.startsWith("/api")) {
+    req.url = fwdUrl;
+    return next();
+  }
+
   next();
 });
 
@@ -166,12 +190,14 @@ app.use((req, res, next) => {
 const apiRouter = express.Router();
 
 // Health check
-apiRouter.get("/health", (_req, res) => {
+const healthHandler = (_req: express.Request, res: express.Response) => {
   res.json({ status: "ok", geminiKeyAvailable: !!process.env.GEMINI_API_KEY });
-});
+};
+apiRouter.get("/health", healthHandler);
+app.get("/health", healthHandler);
 
 // Get quota for a user
-apiRouter.get("/ai-quota", (req, res) => {
+const aiQuotaHandler = (req: express.Request, res: express.Response) => {
   try {
     const username = (req.query.username as string) || "anonymous";
     const month = new Date().toISOString().slice(0, 7); // YYYY-MM
@@ -179,6 +205,7 @@ apiRouter.get("/ai-quota", (req, res) => {
 
     const userLimit = store.monthlyLimits[username] ?? store.defaultMonthlyLimit ?? 20;
     const userUsage = store.usage[month]?.[username] ?? 0;
+    const remaining = Math.max(0, userLimit - userUsage);
 
     res.json({
       success: true,
@@ -186,13 +213,17 @@ apiRouter.get("/ai-quota", (req, res) => {
       username,
       usage: userUsage,
       limit: userLimit,
+      remaining,
       defaultLimit: store.defaultMonthlyLimit ?? 20,
       monthlyLimits: store.monthlyLimits,
+      allUsage: store.usage[month] || {},
     });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
-});
+};
+apiRouter.get("/ai-quota", aiQuotaHandler);
+app.get("/ai-quota", aiQuotaHandler);
 
 // Set quota limit (Admin action)
 apiRouter.post("/ai-quota/limit", (req, res) => {
@@ -221,7 +252,7 @@ apiRouter.post("/ai-quota/limit", (req, res) => {
 });
 
 // Generate realistic curtain preview with Gemini (support both endpoint names)
-apiRouter.post(["/generate-ai-curtain", "/generate-curtain"], async (req, res) => {
+const generateCurtainHandler = async (req: express.Request, res: express.Response) => {
   try {
     const { image, guideImage, prompt, username, swatch1, swatch2, aspectRatio } = req.body;
 
@@ -242,9 +273,10 @@ apiRouter.post(["/generate-ai-curtain", "/generate-curtain"], async (req, res) =
     if (currentUsage >= userLimit) {
       return res.status(429).json({
         error: "QUOTA_EXCEEDED",
-        message: `คุณใช้โควต้าสร้างรูป AI ประจำเดือน ${month} ครบกำหนดแล้ว (${currentUsage}/${userLimit} ครั้ง) กรุณาติดต่อผู้ดูแลระบบเพื่อขอเพิ่มโควต้า`,
+        message: `คุณใช้โควต้าสร้างรูป AI ประจำเดือน ${month} ครบกำหนดแล้ว (${currentUsage}/${userLimit} ครั้ง คงเหลือ 0 ครั้ง) กรุณาติดต่อผู้ดูแลระบบเพื่อขอเพิ่มโควต้า`,
         usage: currentUsage,
         limit: userLimit,
+        remaining: 0,
         month,
       });
     }
@@ -264,6 +296,9 @@ apiRouter.post(["/generate-ai-curtain", "/generate-curtain"], async (req, res) =
     const isVenetianRequest = prompt.includes("HORIZONTAL VENETIAN BLINDS") || prompt.includes("มู่ลี่");
     const isRollerRequest = prompt.includes("ROLLER SHADES") || prompt.includes("ม่านม้วน");
     const isRomanRequest = prompt.includes("ROMAN SHADES") || prompt.includes("ม่านพับ");
+    const isGrommetRequest = prompt.includes("GROMMET") || prompt.includes("ม่านเจาะห่วง") || prompt.includes("eyelet") || prompt.includes("ห่วงตาไก่");
+    const isRippleFoldRequest = prompt.includes("RIPPLE FOLD") || prompt.includes("ม่านลอน") || prompt.includes("S-Fold");
+    const isPinchPleatRequest = prompt.includes("PINCH PLEAT") || prompt.includes("ม่านจีบ");
 
     const parts: any[] = [
       {
@@ -271,7 +306,13 @@ apiRouter.post(["/generate-ai-curtain", "/generate-curtain"], async (req, res) =
           ? "IMAGE 1 (PRIMARY REAL ROOM PHOTOGRAPH TO INPAINT/EDIT):\nThis is the base room photograph. Inpaint custom HORIZONTAL VENETIAN BLINDS onto the designated window area. DO NOT generate fabric drapery or pinch pleat curtains. Strictly preserve this exact room architecture, window frame dimensions, perspective, and orientation without cropping, shrinking the window, or rotating."
           : isRollerRequest
             ? "IMAGE 1 (PRIMARY REAL ROOM PHOTOGRAPH TO INPAINT/EDIT):\nThis is the base room photograph. Inpaint custom FLAT FABRIC ROLLER BLINDS (ม่านม้วน) onto the designated window area. MANDATORY TOP MECHANISM: OPEN ROLL MECHANISM (ไม่มีบังราง / ให้เห็นเป็นม้วนม่านม้วนทรงกระบอกด้านบนอย่างชัดเจน). The cylindrical roller tube wrapped with the rolled fabric MUST BE OPEN, EXPOSED, AND CLEARLY VISIBLE AT THE TOP of the blind. ABSOLUTELY NO cassette box, NO pelmet box, NO fascia, and NO cornice covering the top roller! DO NOT generate fabric drapery or pinch pleats. Strictly preserve this exact room architecture, window scale, proportions, perspective, and orientation."
-            : "IMAGE 1 (PRIMARY REAL ROOM PHOTOGRAPH TO INPAINT/EDIT):\nThis is the base room photograph. Inpaint the requested custom window treatments onto this window. You MUST strictly preserve this exact room architecture, window scale, proportions, perspective, and orientation without cropping, shrinking the window, or rotating.",
+            : isGrommetRequest
+              ? "IMAGE 1 (PRIMARY REAL ROOM PHOTOGRAPH TO EDIT):\nThis is the original base room photograph.\n\n*** MANDATORY ROOM PRESERVATION (คงต้นฉบับห้องไว้ 100% ห้ามเปลี่ยนแปลงเด็ดขาด) ***\n- You MUST preserve this exact room with 100% fidelity: maintain the wall art / picture frame on the left wall, the corner floor lamp, the brown leather armchair, the baby crib and canopy structure on the right, the bedding, the wood flooring, and the exact ceiling/walls outside the window area.\n- ABSOLUTELY DO NOT re-generate, alter, replace, or distort any furniture, objects, or room architecture from the original photo!\n\n*** WINDOW CURTAIN SPECIFICATION (ติดตั้งเฉพาะบริเวณหน้าต่างตามกรอบที่กำหนด) ***\n- Inpaint custom GROMMET / EYELET CURTAINS (ม่านเจาะห่วง) with circular metal grommet rings threaded onto an exposed decorative titanium curtain pole. ABSOLUTELY NO PINCH PLEATS, NO 3-FINGER PLEATS!\n- MOUNTING LEVEL: Mount the titanium pole directly on the plaster wall at the top boundary of the red guide box (approx 20 cm above the window frame), NOT at the ceiling! The wall space above this new pole up to the ceiling is smooth painted wall.\n- BOTTOM HEM: Terminates cleanly at the designated bottom hem line of the red guide box."
+              : isRippleFoldRequest
+                ? "IMAGE 1 (PRIMARY REAL ROOM PHOTOGRAPH TO EDIT):\nThis is the original base room photograph.\n\n*** MANDATORY ROOM PRESERVATION (คงต้นฉบับห้องไว้ 100% ห้ามเปลี่ยนแปลงเด็ดขาด) ***\n- You MUST preserve this exact room with 100% fidelity: maintain the wall art / picture frame on the left wall, the corner floor lamp, the brown leather armchair, the baby crib and canopy structure on the right, the bedding, the wood flooring, and the exact ceiling/walls outside the window area.\n- ABSOLUTELY DO NOT re-generate, alter, replace, or distort any furniture, objects, or room architecture from the original photo!\n\n*** WINDOW CURTAIN SPECIFICATION ***\n- Inpaint custom RIPPLE FOLD / S-FOLD CURTAINS (ม่านลอน) with continuous uniform S-wave ripple folds. ABSOLUTELY NO PINCH PLEATS!\n- MOUNTING LEVEL: Mount the track directly at the top boundary of the red guide box, NOT at the ceiling! The wall above is smooth painted wall."
+                : isPinchPleatRequest
+                  ? "IMAGE 1 (PRIMARY REAL ROOM PHOTOGRAPH TO EDIT):\nThis is the original base room photograph.\n\n*** MANDATORY ROOM PRESERVATION (คงต้นฉบับห้องไว้ 100% ห้ามเปลี่ยนแปลงเด็ดขาด) ***\n- You MUST preserve this exact room with 100% fidelity: maintain the wall art / picture frame on the left wall, the corner floor lamp, the brown leather armchair, the baby crib and canopy structure on the right, the bedding, the wood flooring, and the exact ceiling/walls outside the window area.\n- ABSOLUTELY DO NOT re-generate, alter, replace, or distort any furniture, objects, or room architecture from the original photo!\n\n*** WINDOW CURTAIN SPECIFICATION ***\n- Inpaint custom PINCH PLEAT CURTAINS (ม่านจีบ 3 จีบ) with crisp 3-finger pleats along the heading tape. ABSOLUTELY NO GROMMET EYELET RINGS!\n- MOUNTING LEVEL: Mount the track directly at the top boundary of the red guide box, NOT at the ceiling! The wall above is smooth painted wall."
+                  : "IMAGE 1 (PRIMARY REAL ROOM PHOTOGRAPH TO EDIT):\nThis is the original base room photograph. Strictly preserve this exact room with 100% fidelity: maintain all furniture, wall art, lamps, and flooring. Inpaint the requested custom window treatments onto the designated window boundary.",
       },
       {
         inlineData: {
@@ -289,18 +330,37 @@ apiRouter.post(["/generate-ai-curtain", "/generate-curtain"], async (req, res) =
           text:
             "IMAGE (TARGET INSTALLATION MASK & EXACT CURTAIN STACK POSITIONING GUIDE):\n" +
             "This guide image shows the original room photo with the user's EXACT TARGET INSTALLATION ZONE (red outline polygon) and EXACT CURTAIN STACK POSITIONS.\n" +
-            "CRITICAL RULES (ยึดตามที่กำหนดเป็นหลัก ไม่คิดไปเอง):\n" +
-            "1. STRICT BOUNDARY (ผ้าม่านต้องอยู่ในกรอบพื้นที่ผ้าม่านไม่ขาด ไม่เกิน):\n" +
-            "   - Curtains MUST be installed 100% strictly within the red polygon boundary.\n" +
-            "   - ABSOLUTELY DO NOT install or extend curtains outside this red frame onto adjacent perpendicular side walls, moldings, or columns!\n" +
-            "2. STRAIGHT VS CURVED (แบบโค้งหรือแบบตรงตามที่พื้นที่ผ้าม่านกำหนด):\n" +
+            "CRITICAL MANDATORY RULES (ยึดตามขนาดกรอบพื้นที่ผ้าม่านเป๊ะ 100% ไม่คิดไปเอง):\n" +
+            "1. TOP ROD / TRACK MOUNTING LEVEL (ตำแหน่งติดตั้งรางม่าน):\n" +
+            "   - Mount the curtain track/rod PRECISELY at the top boundary edge of the red polygon (approx 20 cm above the window frame).\n" +
+            "   - The wall section above this rod up to the ceiling is clean, bare, smooth painted wall matching the room's wall paint.\n" +
+            "   - ABSOLUTELY DO NOT move or snap the rod up to the ceiling or ceiling moulding! Keep that space as bare wall identical to the original photo.\n" +
+            "2. EXACT BOTTOM HEM TERMINATION (ระยะชายผ้าม่านด้านล่าง ต้องตรงตามกรอบเป๊ะ 100%):\n" +
+            "   - The bottom hem of the curtain fabric MUST terminate PRECISELY at the bottom boundary edge of the red polygon.\n" +
+            "   - If the red box ends halfway down the wall (e.g., above the floor or window apron), the curtain fabric MUST STOP IN MID-AIR AT THAT EXACT LINE! ABSOLUTELY DO NOT extend the curtain fabric down to touch or hover above the floor! The wall/floor below the bottom edge MUST remain completely exposed.\n" +
+            "   - If the red box extends below the window frame, the curtain fabric MUST NOT be cut short at the window sill. It MUST hang all the way down to the bottom boundary line of the red box!\n" +
+            "3. FOREGROUND OBJECT OCCLUSION & 3D DEPTH LAYERING (การบังของสิ่งของด้านหน้าผ้าม่าน):\n" +
+            "   - Real rooms often have foreground objects (e.g., kitchen appliances, counters, dish drying racks, sterilizers, baby walkers, cribs, chairs, sofas, shelves, headboards, desks, toys, or clutter) in front of the window.\n" +
+            "   - If the designated curtain boundary extends behind or below any foreground objects:\n" +
+            "     * THE CURTAINS HANG IN 3D SPACE BEHIND THOSE FOREGROUND OBJECTS, spanning full height from the top boundary down to the bottom hem boundary line!\n" +
+            "     * DO NOT cut the curtain short or stop it above foreground objects!\n" +
+            "     * ALL foreground objects MUST REMAIN 100% PRESERVED, CRISP, AND UNCHANGED in front of the curtains, naturally overlapping and occluding the fabric behind them.\n" +
+            "4. STRICT HORIZONTAL BOUNDARIES (ความกว้างซ้าย-ขวา ไม่ขาด ไม่เกิน):\n" +
+            "   - Curtains MUST be installed strictly within the left and right edges of the red polygon.\n" +
+            "   - ABSOLUTELY DO NOT spill over onto adjacent perpendicular side walls, moldings, or columns!\n" +
+            "5. STRAIGHT VS CURVED (แบบโค้งหรือแบบตรงตามที่พื้นที่ผ้าม่านกำหนด):\n" +
             "   - If this is a straight window/opening (บานตรงปกติ), the curtain hangs on a straight track directly across the opening. DO NOT bend or curve the track!\n" +
             "   - If this is a curved/bay alcove (บานโค้ง/รางดัด), the curtain follows the continuous curved track.\n" +
-            "3. CURTAIN STACK POSITION (ตำแหน่งการรวบม่านตามที่ระบุ):\n" +
+            "6. CURTAIN STACK POSITION (ตำแหน่งการรวบม่านตามที่ระบุ):\n" +
             "   - If one-way draw to the left (รวบซ้าย): The curtain gathers ONLY on the left side inside the red boundary. The right side is completely clear and open!\n" +
             "   - If one-way draw to the right (รวบขวา): The curtain gathers ONLY on the right side inside the red boundary. The left side is completely clear and open!\n" +
             "   - If center-split (แยกกลาง): Two panels gathered symmetrically on left and right inside the boundary.\n" +
-            "4. Render photorealistic curtains matching the room's real lighting, shadows, and fabric textures. DO NOT render the red guide markings, outlines, or text labels in the final output.",
+            "7. PHOTOREALISM & SEAMLESS PHYSICAL HARMONY (เน้นความสมจริง เป็นผ้าม่านที่ติดตั้งจริง ไม่ดูลอย):\n" +
+            "   - The curtains must look 100% physically installed in the actual room, NOT a flat sticker or disconnected overlay.\n" +
+            "   - Cast authentic, soft contact ambient occlusion shadows on the wall behind the rod, brackets, and fabric folds.\n" +
+            "   - Replicate authentic organic fabric weight and gravity drape with double-folded hem stitching.\n" +
+            "   - Interact naturally with room daylight: rim lighting on leading edges, natural translucency, and soft shadow falloff in fold depths.\n" +
+            "8. DO NOT render the red guide markings, outlines, or text labels in the final output.",
         });
         parts.push({
           inlineData: {
@@ -430,15 +490,18 @@ apiRouter.post(["/generate-ai-curtain", "/generate-curtain"], async (req, res) =
     if (!store.usage[month]) {
       store.usage[month] = {};
     }
-    store.usage[month][user] = currentUsage + 1;
+    const nextUsage = currentUsage + 1;
+    store.usage[month][user] = nextUsage;
     saveQuotaStore(store);
 
     res.json({
       success: true,
       imageUrl: finalImageUrl,
-      usage: currentUsage + 1,
+      usage: nextUsage,
       limit: userLimit,
+      remaining: Math.max(0, userLimit - nextUsage),
       month,
+      feedback: textFeedback.trim() || undefined,
     });
   } catch (err: any) {
     console.error("AI Curtain Generation Error:", err);
@@ -465,7 +528,10 @@ apiRouter.post(["/generate-ai-curtain", "/generate-curtain"], async (req, res) =
       message: err.message || "เกิดข้อผิดพลาดในการประมวลผลรูปภาพด้วย AI",
     });
   }
-});
+};
+
+apiRouter.post(["/generate-ai-curtain", "/generate-curtain"], generateCurtainHandler);
+app.post(["/generate-ai-curtain", "/generate-curtain"], generateCurtainHandler);
 
 // Catch-all 404 handler for API routes (always return JSON, never HTML)
 apiRouter.all("*", (req, res) => {

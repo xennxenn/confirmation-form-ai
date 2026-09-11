@@ -60,7 +60,8 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
   // Generating status per item
   const [generatingIds, setGeneratingIds] = useState<Set<string>>(new Set());
   // User monthly quota
-  const [quota, setQuota] = useState<{ usage: number; limit: number; month: string } | null>(null);
+  const [quota, setQuota] = useState<{ usage: number; limit: number; remaining: number; month: string } | null>(null);
+  const [allUsage, setAllUsage] = useState<Record<string, number>>({});
   const [loadingQuota, setLoadingQuota] = useState(false);
   // Admin quota modal
   const [showQuotaModal, setShowQuotaModal] = useState(false);
@@ -130,9 +131,15 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
       let data: any = null;
       try { data = JSON.parse(text); } catch {}
       if (data && data.success) {
-        setQuota({ usage: data.usage, limit: data.limit, month: data.month });
+        const usage = typeof data.usage === 'number' ? data.usage : 0;
+        const limit = typeof data.limit === 'number' ? data.limit : 20;
+        const remaining = typeof data.remaining === 'number' ? data.remaining : Math.max(0, limit - usage);
+        setQuota({ usage, limit, remaining, month: data.month });
         setAdminLimits(data.monthlyLimits || {});
         setDefaultLimit(data.defaultLimit || 20);
+        if (data.allUsage) {
+          setAllUsage(data.allUsage);
+        }
       }
     } catch (e) {
       console.warn('Could not fetch AI quota:', e);
@@ -292,10 +299,10 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
       bracket: item.bracket,
       hangStyle: item.hangStyle,
       accessories: item.accessories,
-      marginLeft: item.marginLeft,
-      marginRight: item.marginRight,
-      marginTop: item.marginTop,
-      marginBottom: item.marginBottom,
+      marginLeft: item.marginLeft === 'ระบุเอง...' ? (item.customMarginLeft || '') : item.marginLeft,
+      marginRight: item.marginRight === 'ระบุเอง...' ? (item.customMarginRight || '') : item.marginRight,
+      marginTop: item.marginTop === 'ระบุเอง...' ? (item.customMarginTop || '') : item.marginTop,
+      marginBottom: item.marginBottom === 'ระบุเอง...' ? (item.customMarginBottom || '') : item.marginBottom,
       fabricName1: fab1?.name,
       fabricColor1: fab1?.color,
       fabricSubtype1: fab1?.subType,
@@ -345,10 +352,11 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
         console.warn('Aspect ratio probe error:', probeErr);
       }
 
-      // Pre-convert swatch images to Base64 in client browser so server doesn't need to fetch external URLs
+      // Pre-convert images to optimized Base64 in client browser so server doesn't hit payload limits (e.g. Vercel 4.5MB limit)
       const toClientBase64 = async (imgUrl: string | null | undefined): Promise<string | undefined> => {
         if (!imgUrl || typeof imgUrl !== 'string') return undefined;
-        if (imgUrl.startsWith('data:image/')) return imgUrl;
+        // If data URL is already small and lightweight (< 350KB), return as is
+        if (imgUrl.startsWith('data:image/') && imgUrl.length < 350000) return imgUrl;
 
         try {
           const img = new Image();
@@ -359,10 +367,11 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
             if (img.complete && img.naturalWidth > 0) return resolve(null);
             img.onload = () => resolve(null);
             img.onerror = () => reject(new Error('Image load failed'));
-            setTimeout(() => reject(new Error('Image timeout')), 2500);
+            setTimeout(() => reject(new Error('Image timeout')), 3500);
           });
 
-          const maxDim = 512;
+          // Downscale to 960px max dimension for optimal Gemini processing while keeping payload well within limits
+          const maxDim = 960;
           let w = img.naturalWidth;
           let h = img.naturalHeight;
           if (w > maxDim || h > maxDim) {
@@ -380,7 +389,7 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
           const ctx = canvas.getContext('2d');
           if (ctx) {
             ctx.drawImage(img, 0, 0, w, h);
-            return canvas.toDataURL('image/jpeg', 0.85);
+            return canvas.toDataURL('image/jpeg', 0.82);
           }
         } catch (e) {
           // If browser canvas tainted by cross-origin, try fetch-as-blob
@@ -412,6 +421,10 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
           maskPct: number;
           layers: number;
           fabricColor?: string;
+          marginTop?: string;
+          marginBottom?: string;
+          marginLeft?: string;
+          marginRight?: string;
         }
       ): Promise<string | undefined> => {
         if (!photoDataUrl || !areasList || areasList.length === 0) return undefined;
@@ -450,7 +463,10 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
           // Draw original room photo
           ctx.drawImage(img, 0, 0, w, h);
 
-          const { action, maskPct, layers } = itemConfig;
+          const { action, maskPct, layers, style, marginLeft } = itemConfig;
+          const isGrommetCurtain = (style || '').includes('เจาะห่วง') || (style || '').toLowerCase().includes('grommet') || (style || '').toLowerCase().includes('eyelet');
+          const isRippleFoldCurtain = ((style || '').includes('ม่านลอน') || (style || '').includes('ลอนเทป') || (style || '').toLowerCase().includes('ripple') || (style || '').toLowerCase().includes('s-fold')) && !isGrommetCurtain;
+          const isPinchPleatCurtain = ((style || '').includes('ม่านจีบ') || (style || '').toLowerCase().includes('pinch')) && !isGrommetCurtain && !isRippleFoldCurtain;
           const isSplit = action.includes('แยกกลาง') || action.includes('กลาง') || action.includes('2 ผืน');
           const isOneWayLeft = (action.includes('ซ้าย') || action.includes('1 ผืน')) && !isSplit;
           const isOneWayRight = action.includes('ขวา') && !isSplit;
@@ -504,10 +520,41 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
                   ctx.stroke();
                 }
 
+                // If Grommet curtain, draw titanium rod and circular eyelet rings across header
+                if (isGrommetCurtain) {
+                  ctx.save();
+                  // Exposed metallic rod
+                  ctx.fillStyle = '#475569';
+                  ctx.fillRect(startX - 4, minY_px + 6, stackWidth + 8, Math.max(4, Math.round(w * 0.005)));
+                  // Eyelet rings
+                  const numRings = Math.max(3, Math.round(stackWidth / 22));
+                  for (let r = 0; r < numRings; r++) {
+                    const rx = startX + 10 + (r * (stackWidth - 20)) / Math.max(1, numRings - 1);
+                    const ry = minY_px + 9;
+                    ctx.beginPath();
+                    ctx.arc(rx, ry, 6, 0, Math.PI * 2);
+                    ctx.fillStyle = '#cbd5e1';
+                    ctx.fill();
+                    ctx.beginPath();
+                    ctx.arc(rx, ry, 3.5, 0, Math.PI * 2);
+                    ctx.fillStyle = '#0f172a';
+                    ctx.fill();
+                  }
+                  ctx.restore();
+                }
+
                 // Stack outline
                 ctx.strokeStyle = 'rgba(70, 50, 30, 0.5)';
                 ctx.lineWidth = 1.5;
                 ctx.strokeRect(startX, minY_px, stackWidth, h_px);
+
+                // Bottom folded hem edge
+                ctx.strokeStyle = 'rgba(70, 50, 30, 0.9)';
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.moveTo(startX, maxY_px);
+                ctx.lineTo(endX, maxY_px);
+                ctx.stroke();
               };
 
               if (isSplit) {
@@ -543,9 +590,52 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
                 // Standard full coverage or blinds
                 ctx.fillStyle = 'rgba(239, 68, 68, 0.25)';
                 ctx.fill();
+                ctx.strokeStyle = '#ef4444';
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.moveTo(minX_px, maxY_px);
+                ctx.lineTo(maxX_px, maxY_px);
+                ctx.stroke();
               }
 
               ctx.restore(); // Restore out of clipping path
+
+              // 1b. Continuous curtain rod/track across the entire window span at minY_px
+              ctx.save();
+              const rodY = minY_px + 5;
+              const rodH = Math.max(5, Math.round(w * 0.0055));
+              const rodLeft = Math.max(2, minX_px - 20);
+              const rodRight = Math.min(w - 2, maxX_px + 20);
+              const rodW = rodRight - rodLeft;
+
+              if (isGrommetCurtain) {
+                // Titanium metallic gradient
+                const rGrad = ctx.createLinearGradient(0, rodY, 0, rodY + rodH);
+                rGrad.addColorStop(0, '#64748b');
+                rGrad.addColorStop(0.35, '#e2e8f0');
+                rGrad.addColorStop(0.7, '#94a3b8');
+                rGrad.addColorStop(1, '#334155');
+                ctx.fillStyle = rGrad;
+                ctx.fillRect(rodLeft, rodY, rodW, rodH);
+
+                // Finials
+                ctx.fillStyle = '#64748b';
+                ctx.beginPath();
+                ctx.arc(rodLeft, rodY + rodH / 2, rodH * 1.3, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.beginPath();
+                ctx.arc(rodRight, rodY + rodH / 2, rodH * 1.3, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Wall brackets
+                ctx.fillStyle = '#475569';
+                ctx.fillRect(minX_px + 6, rodY + rodH, 6, 12);
+                ctx.fillRect(maxX_px - 14, rodY + rodH, 6, 12);
+              } else {
+                ctx.fillStyle = '#64748b';
+                ctx.fillRect(rodLeft, rodY, rodW, Math.max(3, rodH - 2));
+              }
+              ctx.restore();
 
               // 2. Stroke the user polygon boundary in red (matching ImageAreaEditor)
               ctx.save();
@@ -562,24 +652,7 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
               ctx.lineJoin = 'round';
               ctx.stroke();
 
-              // 3. Highlight top ceiling track line
-              if (area.points.length >= 3) {
-                ctx.strokeStyle = '#fbbf24';
-                ctx.lineWidth = Math.max(3, Math.round(w * 0.0045));
-                ctx.beginPath();
-                const sortedByY = [...area.points].sort((a: any, b: any) => a.y - b.y);
-                const minYVal = sortedByY[0].y;
-                const topPoints = area.points.filter((p: any) => Math.abs(p.y - minYVal) < 25);
-                topPoints.forEach((p: any, tIdx: number) => {
-                  const px = (p.x / 100) * w;
-                  const py = (p.y / 100) * h;
-                  if (tIdx === 0) ctx.moveTo(px, py);
-                  else ctx.lineTo(px, py);
-                });
-                ctx.stroke();
-              }
-
-              // 4. Draw vertex dots
+              // 3. Draw vertex dots matching 155407
               area.points.forEach((p: any) => {
                 const px = (p.x / 100) * w;
                 const py = (p.y / 100) * h;
@@ -588,51 +661,57 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
                 ctx.arc(px, py, radius, 0, Math.PI * 2);
                 ctx.fillStyle = '#ffffff';
                 ctx.fill();
-                ctx.strokeStyle = '#dc2626';
+                ctx.strokeStyle = '#ef4444';
                 ctx.lineWidth = 2;
                 ctx.stroke();
               });
 
-              // 5. Informative text badges for Gemini
-              ctx.font = `bold ${Math.max(12, Math.round(w * 0.016))}px sans-serif`;
-              ctx.textBaseline = 'top';
+              // 4. Dimension badges matching Screenshot 155407 exactly (White pill with red text)
+              const drawDimensionPill = (text: string, cx: number, cy: number) => {
+                ctx.save();
+                const fontSize = Math.max(11, Math.round(w * 0.014));
+                ctx.font = `bold ${fontSize}px sans-serif`;
+                const metrics = ctx.measureText(text);
+                const padX = 8;
+                const padY = 3;
+                const pillW = metrics.width + padX * 2;
+                const pillH = fontSize + padY * 2;
+                const rx = cx - pillW / 2;
+                const ry = cy - pillH / 2;
 
-              if (isSplit) {
-                // Left badge
-                ctx.fillStyle = '#1e3a8a';
-                ctx.fillText('◀ รวบซ้าย (LEFT STACK)', minX_px + 8, minY_px + 12);
-                // Right badge
-                ctx.fillStyle = '#1e3a8a';
-                ctx.fillText('รวบขวา (RIGHT STACK) ▶', maxX_px - stackW + 8, minY_px + 12);
-                // Center open badge
-                ctx.fillStyle = '#065f46';
-                const centerText = layers === 2 ? '◎ ม่านโปร่ง / เปิดแยกกลาง (SHEER / OPEN)' : '◎ เปิดโล่งแยกกลาง (OPEN GLASS)';
-                const textMetrics = ctx.measureText(centerText);
-                const midCenter = minX_px + stackW + (w_px - 2 * stackW - textMetrics.width) / 2;
-                if (midCenter > minX_px + stackW) {
-                  ctx.fillText(centerText, midCenter, minY_px + 16);
+                ctx.fillStyle = '#ffffff';
+                ctx.shadowColor = 'rgba(0, 0, 0, 0.25)';
+                ctx.shadowBlur = 4;
+                ctx.beginPath();
+                if (typeof (ctx as any).roundRect === 'function') {
+                  (ctx as any).roundRect(rx, ry, pillW, pillH, 4);
+                } else {
+                  ctx.rect(rx, ry, pillW, pillH);
                 }
-              } else if (isOneWayLeft) {
-                // Left badge: Curtain stack
-                ctx.fillStyle = '#1e3a8a';
-                ctx.fillText('◀ ผ้าม่านรวบซ้าย (CURTAIN STACK LEFT)', minX_px + 8, minY_px + 12);
-                // Center/Right badge: Open
-                ctx.fillStyle = '#065f46';
-                const openText = layers === 2 ? '◎ ม่านโปร่ง / เปิดโล่งไม่มีม่านทึบ (OPEN / NO OPAQUE CURTAIN)' : '◎ เปิดโล่ง ไม่มีผ้าม่านด้านนี้ (OPEN DOORWAY / NO CURTAIN)';
-                const textMetrics = ctx.measureText(openText);
-                const midCenter = minX_px + stackW + 16;
-                if (midCenter + textMetrics.width <= maxX_px) {
-                  ctx.fillText(openText, midCenter, minY_px + 16);
-                }
-              } else if (isOneWayRight) {
-                // Right badge: Curtain stack
-                ctx.fillStyle = '#1e3a8a';
-                ctx.fillText('ผ้าม่านรวบขวา (CURTAIN STACK RIGHT) ▶', maxX_px - stackW + 8, minY_px + 12);
-                // Left/Center badge: Open
-                ctx.fillStyle = '#065f46';
-                const openText = layers === 2 ? '◎ ม่านโปร่ง / เปิดโล่งไม่มีม่านทึบ (OPEN / NO OPAQUE CURTAIN)' : '◎ เปิดโล่ง ไม่มีผ้าม่านด้านนี้ (OPEN DOORWAY / NO CURTAIN)';
-                ctx.fillText(openText, minX_px + 12, minY_px + 16);
-              }
+                ctx.fill();
+                ctx.shadowBlur = 0;
+
+                ctx.strokeStyle = '#ef4444';
+                ctx.lineWidth = 1;
+                ctx.stroke();
+
+                ctx.fillStyle = '#dc2626';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(text, cx, cy);
+                ctx.restore();
+              };
+
+              const widthText = `${area.width || (itemConfig as any)?.width || '200'} ซม.`;
+              const heightText = `${area.height || (itemConfig as any)?.height || '231'} ซม.`;
+
+              // Top dimension pill (centered on top edge)
+              const topMidX = (minX_px + maxX_px) / 2;
+              drawDimensionPill(widthText, topMidX, Math.max(12, minY_px - 14));
+
+              // Right dimension pill (centered on right edge)
+              const rightMidY = (minY_px + maxY_px) / 2;
+              drawDimensionPill(heightText, Math.min(w - 24, maxX_px + 28), rightMidY);
 
               ctx.restore();
             }
@@ -661,6 +740,10 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
           maskPct: itemMaskPct,
           layers: item.layers || 1,
           fabricColor: fab1?.color,
+          marginTop: item.marginTop === 'ระบุเอง...' ? (item.customMarginTop || '') : item.marginTop,
+          marginBottom: item.marginBottom === 'ระบุเอง...' ? (item.customMarginBottom || '') : item.marginBottom,
+          marginLeft: item.marginLeft === 'ระบุเอง...' ? (item.customMarginLeft || '') : item.marginLeft,
+          marginRight: item.marginRight === 'ระบุเอง...' ? (item.customMarginRight || '') : item.marginRight,
         }
       );
 
@@ -708,13 +791,25 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
         data = JSON.parse(responseText);
       } catch (parseErr) {
         console.error("Non-JSON API response from server:", responseText);
+        if (res.status === 413) {
+          throw new Error("ขนาดไฟล์รูปภาพมีขนาดใหญ่เกินไปสำหรับ Vercel Serverless Function (413 Payload Too Large) ระบบได้ทำการบีบอัดรูปภาพให้แล้ว กรุณาลองใหม่อีกครั้ง");
+        }
+        if (res.status === 504) {
+          throw new Error("เซิร์ฟเวอร์ใช้เวลาประมวลผลนานเกินกำหนด (504 Gateway Timeout) กรุณาลองใหม่อีกครั้ง");
+        }
         if (responseText.includes("A server error") || res.status >= 500) {
-          throw new Error("เซิร์ฟเวอร์ Vercel เกิดข้อผิดพลาด (500): กรุณาตรวจสอบว่าได้ตั้งค่า GEMINI_API_KEY ใน Environment Variables ของ Vercel และกด Redeploy แล้ว");
+          throw new Error("เซิร์ฟเวอร์เกิดข้อผิดพลาด (500): กรุณาตรวจสอบว่าได้ตั้งค่า GEMINI_API_KEY ใน Environment Variables ของเซิร์ฟเวอร์/Vercel และกดบันทึกแล้ว");
         }
         throw new Error(`เซิร์ฟเวอร์ตอบกลับผิดรูปแบบ (${res.status}): ${responseText.slice(0, 100)}`);
       }
 
       if (!res.ok || !data?.success) {
+        if (data?.error === "QUOTA_EXCEEDED") {
+          const userL = data.limit ?? quota?.limit ?? 20;
+          const userU = data.usage ?? userL;
+          setQuota({ usage: userU, limit: userL, remaining: 0, month: data.month || quota?.month || '' });
+          throw new Error(data.message || `โควต้าสร้างรูป AI ของคุณหมดแล้วสำหรับเดือนนี้ (${userU}/${userL} ครั้ง คงเหลือ 0 ครั้ง) หากต้องการเพิ่มโควต้าโปรดติดต่อผู้ดูแลระบบ (Admin)`);
+        }
         if (data?.isQuotaExceeded || data?.error === "GEMINI_QUOTA_EXCEEDED" || res.status === 429) {
           throw new Error("โควต้าโมเดลสร้างรูปภาพ Gemini API เต็ม หรือบัญชีเป็น Free Tier (โมเดลสร้างรูปภาพต้องเปิดใช้งาน Billing/Pay-as-you-go ใน Google AI Studio)");
         }
@@ -732,7 +827,11 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
       };
       onUpdateItem(item.id, updatedItem);
       setViewModes(prev => ({ ...prev, [item.id]: 'ai' }));
-      setQuota({ usage: data.usage, limit: data.limit, month: data.month });
+      
+      const nextUsage = typeof data.usage === 'number' ? data.usage : ((quota?.usage || 0) + 1);
+      const curLimit = typeof data.limit === 'number' ? data.limit : (quota?.limit || 20);
+      const curRemaining = typeof data.remaining === 'number' ? data.remaining : Math.max(0, curLimit - nextUsage);
+      setQuota({ usage: nextUsage, limit: curLimit, remaining: curRemaining, month: data.month || quota?.month || '' });
 
       // Auto-save immediately using itemsRef to ensure generated AI image is permanently persisted
       if (onSave) {
@@ -1056,20 +1155,32 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
               </button>
             )}
 
-            {/* Quota Badge */}
+            {/* Quota Badge showing: โควต้าทั้งหมด, ใช้ไปแล้ว, เหลืออีกเท่าไร */}
             {quota && (
-              <div className="flex items-center gap-2 bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-1.5 text-xs">
-                <span className="text-indigo-700 font-medium">โควต้าเดือนนี้:</span>
-                <span className={`font-bold ${quota.usage >= quota.limit ? 'text-red-600' : 'text-indigo-900'}`}>
-                  {quota.usage} / {quota.limit} ครั้ง
-                </span>
+              <div className="flex items-center gap-2 bg-gradient-to-r from-indigo-50 to-purple-50 border border-indigo-200 rounded-lg px-3 py-1.5 text-xs shadow-sm">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-indigo-800 font-bold">โควต้าของคุณ:</span>
+                  <span className="text-gray-700">มี <strong className="text-indigo-950 font-extrabold">{quota.limit}</strong> ครั้ง</span>
+                  <span className="text-gray-300">|</span>
+                  <span className="text-gray-700">ใช้ไป <strong className="text-gray-900 font-extrabold">{quota.usage}</strong></span>
+                  <span className="text-gray-300">|</span>
+                  <span className={`px-2 py-0.5 rounded-full font-extrabold text-[11px] shadow-xs flex items-center gap-1 ${
+                    quota.remaining <= 0
+                      ? 'bg-red-100 text-red-700 border border-red-300 animate-pulse'
+                      : quota.remaining <= 5
+                      ? 'bg-amber-100 text-amber-800 border border-amber-300'
+                      : 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                  }`}>
+                    {quota.remaining <= 0 ? 'หมดแล้ว (เหลือ 0 ครั้ง)' : `เหลืออีก ${quota.remaining} ครั้ง`}
+                  </span>
+                </div>
                 <button
                   onClick={fetchQuota}
                   disabled={loadingQuota}
-                  title="รีเฟรชโควต้า"
-                  className="text-indigo-400 hover:text-indigo-600 transition-colors"
+                  title="รีเฟรชข้อมูลโควต้า"
+                  className="p-1 text-indigo-500 hover:text-indigo-700 hover:bg-indigo-100 rounded transition-colors"
                 >
-                  <RefreshCw size={12} className={loadingQuota ? 'animate-spin' : ''} />
+                  <RefreshCw size={13} className={loadingQuota ? 'animate-spin' : ''} />
                 </button>
               </div>
             )}
@@ -1163,7 +1274,9 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
             {selectedIds.size > 0 && (
               <button
                 onClick={handleBatchGenerate}
-                className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1 rounded text-xs font-bold shadow transition-colors"
+                disabled={quota ? quota.remaining < selectedIds.size : false}
+                className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white px-3 py-1 rounded text-xs font-bold shadow transition-colors"
+                title={quota && quota.remaining < selectedIds.size ? `โควต้าคงเหลือไม่พอ (${quota.remaining} ครั้ง)` : undefined}
               >
                 <Sparkles size={13} /> สร้างรูป AI หน้าที่เลือก ({selectedIds.size})
               </button>
@@ -1526,8 +1639,9 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
                   {/* Generate / Regenerate button */}
                   <button
                     onClick={() => handleGenerate(item)}
-                    disabled={isGenerating}
-                    className="flex items-center gap-1 bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1 rounded font-bold shadow-sm transition-all disabled:opacity-50"
+                    disabled={isGenerating || (quota ? quota.remaining <= 0 : false)}
+                    className="flex items-center gap-1 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white px-3 py-1 rounded font-bold shadow-sm transition-all"
+                    title={quota && quota.remaining <= 0 ? 'โควต้าสร้างรูป AI ของคุณหมดแล้วสำหรับเดือนนี้ (0 ครั้ง)' : undefined}
                   >
                     <Sparkles size={13} className={isGenerating ? 'animate-spin' : ''} />
                     {isGenerating ? 'กำลังสร้างภาพ...' : item.aiImage ? 'สร้างใหม่ (Regenerate)' : 'สร้างรูปด้วย AI'}
@@ -1767,19 +1881,19 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
                         <div className="grid grid-cols-2 gap-y-2 text-[12px]">
                           <div>
                             <span className="text-gray-500 font-bold block">ด้านซ้าย:</span>
-                            <span className="font-bold text-gray-800">{item.marginLeft || item.customMarginLeft || '-'}</span>
+                            <span className="font-bold text-gray-800">{item.marginLeft === 'ระบุเอง...' ? (item.customMarginLeft || '-') : (item.marginLeft || item.customMarginLeft || '-')}</span>
                           </div>
                           <div>
                             <span className="text-gray-500 font-bold block">ด้านขวา:</span>
-                            <span className="font-bold text-gray-800">{item.marginRight || item.customMarginRight || '-'}</span>
+                            <span className="font-bold text-gray-800">{item.marginRight === 'ระบุเอง...' ? (item.customMarginRight || '-') : (item.marginRight || item.customMarginRight || '-')}</span>
                           </div>
                           <div>
                             <span className="text-gray-500 font-bold block">ด้านบน:</span>
-                            <span className="font-bold text-gray-800">{item.marginTop || item.customMarginTop || '-'}</span>
+                            <span className="font-bold text-gray-800">{item.marginTop === 'ระบุเอง...' ? (item.customMarginTop || '-') : (item.marginTop || item.customMarginTop || '-')}</span>
                           </div>
                           <div>
                             <span className="text-gray-500 font-bold block">ด้านล่าง:</span>
-                            <span className="font-bold text-gray-800">{item.marginBottom || item.customMarginBottom || '-'}</span>
+                            <span className="font-bold text-gray-800">{item.marginBottom === 'ระบุเอง...' ? (item.customMarginBottom || '-') : (item.marginBottom || item.customMarginBottom || '-')}</span>
                           </div>
                         </div>
                       </div>
@@ -1918,6 +2032,8 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
                 {allAccounts && allAccounts.length > 0 ? (
                   allAccounts.map(acc => {
                     const currentL = adminLimits[acc.username] ?? defaultLimit;
+                    const empUsage = allUsage[acc.username] || 0;
+                    const empRemaining = Math.max(0, currentL - empUsage);
                     return (
                       <div
                         key={acc.id || acc.username}
@@ -1927,9 +2043,20 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
                           <span className="font-bold text-gray-800 text-sm block">
                             {acc.name || acc.username}
                           </span>
-                          <span className="text-[11px] text-gray-500">
-                            Username: {acc.username} {acc.role === 'admin' ? '(Admin)' : ''}
-                          </span>
+                          <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
+                            <span className="text-[11px] text-gray-500">
+                              @{acc.username} {acc.role === 'admin' ? '(Admin)' : ''}
+                            </span>
+                            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${
+                              empRemaining <= 0
+                                ? 'bg-red-50 text-red-700 border-red-200'
+                                : empRemaining <= 5
+                                ? 'bg-amber-50 text-amber-800 border-amber-200'
+                                : 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                            }`}>
+                              ใช้ไป {empUsage}/{currentL} (เหลือ {empRemaining} ครั้ง)
+                            </span>
+                          </div>
                         </div>
                         <div className="flex items-center gap-2">
                           <input
