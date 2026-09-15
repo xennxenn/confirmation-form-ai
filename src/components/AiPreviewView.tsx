@@ -3,7 +3,7 @@ import {
   ArrowLeft, Sparkles, Printer, CheckSquare, Square, 
   Download, RefreshCw, Sliders, Check, AlertCircle, CheckCircle2,
   Eye, Layers, Image as ImageIcon, Save, Trash2, X,
-  Undo, Redo, Share2, FileText
+  Undo, Redo, Share2, FileText, Key
 } from 'lucide-react';
 import { CurtainItem, GeneralInfo } from '../types';
 import { InfoCard } from './InfoCard';
@@ -79,6 +79,47 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
     keyPrefix?: string;
   } | null>(null);
 
+  // Client-custom Gemini Key state (stored in localStorage)
+  const getCustomGeminiKey = (): string => {
+    try {
+      return (localStorage.getItem('custom_gemini_api_key') || '').trim();
+    } catch {
+      return '';
+    }
+  };
+
+  const [customKeyInput, setCustomKeyInput] = useState<string>(() => {
+    try {
+      return (localStorage.getItem('custom_gemini_api_key') || '').trim();
+    } catch {
+      return '';
+    }
+  });
+  const [customKeySavedSuccess, setCustomKeySavedSuccess] = useState(false);
+
+  const handleSaveCustomKey = () => {
+    const key = customKeyInput.trim();
+    if (!key) return;
+    try {
+      localStorage.setItem('custom_gemini_api_key', key);
+      setCustomKeySavedSuccess(true);
+      setGeminiKeyConfigured(true);
+      setTimeout(() => setCustomKeySavedSuccess(false), 5000);
+      handleTestConnection();
+    } catch (e) {
+      console.warn("Could not save custom key:", e);
+    }
+  };
+
+  const handleClearCustomKey = () => {
+    try {
+      localStorage.removeItem('custom_gemini_api_key');
+      setCustomKeyInput('');
+      setCustomKeySavedSuccess(false);
+      handleTestConnection();
+    } catch {}
+  };
+
   // Keep live reference to items to strictly prevent stale closure race conditions in async operations
   const itemsRef = React.useRef(items);
   useEffect(() => {
@@ -136,7 +177,10 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
   const fetchQuota = async () => {
     try {
       setLoadingQuota(true);
-      const res = await fetch(`/api/ai-quota?username=${encodeURIComponent(appUser.username)}`);
+      const customKey = getCustomGeminiKey();
+      const headers: Record<string, string> = {};
+      if (customKey) headers['x-gemini-api-key'] = customKey;
+      const res = await fetch(`/api/ai-quota?username=${encodeURIComponent(appUser.username)}${customKey ? `&customApiKey=${encodeURIComponent(customKey)}` : ''}`, { headers });
       const text = await res.text();
       let data: any = null;
       try { data = JSON.parse(text); } catch {}
@@ -156,7 +200,7 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
       } else {
         // Fallback health check
         try {
-          const hRes = await fetch('/api/health');
+          const hRes = await fetch(`/api/health${customKey ? `?customApiKey=${encodeURIComponent(customKey)}` : ''}`, { headers });
           const hData = await hRes.json();
           if (typeof hData?.geminiKeyConfigured === 'boolean') {
             setGeminiKeyConfigured(hData.geminiKeyConfigured);
@@ -176,11 +220,15 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
     try {
       setLoadingQuota(true);
       setKeyTestStatus(null);
+      const customKey = getCustomGeminiKey();
+      const headers: Record<string, string> = {};
+      if (customKey) headers['x-gemini-api-key'] = customKey;
+
       const [resQuota, resHealth] = await Promise.all([
-        fetch(`/api/ai-quota?username=${encodeURIComponent(appUser.username)}`)
+        fetch(`/api/ai-quota?username=${encodeURIComponent(appUser.username)}${customKey ? `&customApiKey=${encodeURIComponent(customKey)}` : ''}`, { headers })
           .then(r => r.json())
           .catch(() => null),
-        fetch('/api/health')
+        fetch(`/api/health${customKey ? `?customApiKey=${encodeURIComponent(customKey)}` : ''}`, { headers })
           .then(r => r.json())
           .catch(() => null),
       ]);
@@ -188,13 +236,14 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
       const isConfigured = Boolean(
         resQuota?.geminiKeyConfigured ||
         resHealth?.geminiKeyConfigured ||
-        resHealth?.geminiKeyAvailable
+        resHealth?.geminiKeyAvailable ||
+        (customKey && customKey.length > 5)
       );
 
       if (isConfigured) {
         setGeminiKeyConfigured(true);
-        const prefix = resHealth?.keyPrefix || resQuota?.keyPrefix || '';
-        const len = resHealth?.keyLength || resQuota?.keyLength || 0;
+        const prefix = resHealth?.keyPrefix || resQuota?.keyPrefix || (customKey ? `${customKey.slice(0, 4)}...${customKey.slice(-4)}` : '');
+        const len = resHealth?.keyLength || resQuota?.keyLength || (customKey ? customKey.length : 0);
         setKeyTestStatus({
           checked: true,
           success: true,
@@ -214,7 +263,7 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
           checked: true,
           success: false,
           message: 'เซิร์ฟเวอร์ยังตรวจไม่พบตัวแปร GEMINI_API_KEY',
-          details: 'หากเพิ่งเพิ่มตัวแปรใน Vercel กรุณาไปที่แท็บ Deployments > กดจุดสามจุด (...) > Redeploy เพื่อให้เซิร์ฟเวอร์โหลดค่าตัวแปรใหม่',
+          details: 'กรุณากรอก API Key ในช่องด้านล่าง หรือไปที่ Vercel Dashboard > Settings > Environment Variables เพื่อเพิ่มตัวแปร GEMINI_API_KEY',
         });
       }
     } catch (e: any) {
@@ -828,9 +877,13 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
         }
       );
 
+      const customKey = getCustomGeminiKey();
+      const reqHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (customKey) reqHeaders['x-gemini-api-key'] = customKey;
+
       let res = await fetch('/api/generate-ai-curtain', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: reqHeaders,
         body: JSON.stringify({
           image: basePhoto,
           guideImage: guideImageDataUrl,
@@ -840,6 +893,7 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
           username: appUser.username,
           itemId: item.id,
           aspectRatio: determinedAspectRatio,
+          customApiKey: customKey || undefined,
         }),
       });
 
@@ -848,7 +902,7 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
         try {
           const retryRes = await fetch('/generate-ai-curtain', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: reqHeaders,
             body: JSON.stringify({
               image: basePhoto,
               guideImage: guideImageDataUrl,
@@ -858,6 +912,7 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
               username: appUser.username,
               itemId: item.id,
               aspectRatio: determinedAspectRatio,
+              customApiKey: customKey || undefined,
             }),
           });
           if (retryRes.status !== 404) {
@@ -1301,6 +1356,15 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
                 <Sliders size={14} /> ตั้งค่าโควต้า
               </button>
             )}
+
+            {/* Gemini API Key Settings Button */}
+            <button
+              onClick={() => setShowKeyGuideModal(true)}
+              className="flex items-center gap-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors"
+              title="ตั้งค่า หรือฝัง Gemini API Key"
+            >
+              <Key size={14} /> ตั้งค่า API Key
+            </button>
 
             {/* Share / PDF Export Button */}
             <button
@@ -2244,6 +2308,52 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
             </div>
 
             <div className="p-6 space-y-4 max-h-[75vh] overflow-y-auto text-sm text-gray-700 leading-relaxed">
+              {/* Option to embed/paste key directly into the application */}
+              <div className="bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 border-2 border-blue-300 rounded-xl p-4 shadow-sm">
+                <div className="flex items-center justify-between gap-2 mb-1.5">
+                  <div className="flex items-center gap-2 font-bold text-blue-950 text-sm">
+                    <Key size={18} className="text-blue-600 shrink-0" />
+                    <span>วิธีที่ 1: ฝังหรือกรอก Gemini API Key ในหน้านี้โดยตรง (ใช้งานได้ทันที)</span>
+                  </div>
+                  {customKeyInput && (
+                    <button
+                      type="button"
+                      onClick={handleClearCustomKey}
+                      className="text-[11px] text-red-600 hover:text-red-700 underline font-medium"
+                    >
+                      ล้าง Key ที่บันทึก
+                    </button>
+                  )}
+                </div>
+                <p className="text-xs text-blue-900 mb-3 leading-relaxed">
+                  หากพบปัญหาบนเซิร์ฟเวอร์ หรือไม่ต้องการตั้งค่า Environment Variables บน Vercel คุณสามารถวาง Gemini API Key ที่นี่ ระบบจะจดจำไว้ในบราวเซอร์ของคุณและส่งไปสร้างภาพได้ทันที:
+                </p>
+                <div className="flex gap-2">
+                  <input
+                    type="password"
+                    value={customKeyInput}
+                    onChange={(e) => setCustomKeyInput(e.target.value)}
+                    placeholder="วาง Gemini API Key ที่นี่ (เช่น AIzaSy...)"
+                    className="flex-1 text-xs border border-blue-300 rounded-lg px-3 py-2 bg-white text-gray-800 font-mono focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-inner"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleSaveCustomKey}
+                    disabled={!customKeyInput.trim()}
+                    className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold px-4 py-2 rounded-lg text-xs shadow-sm transition-colors shrink-0 flex items-center gap-1.5"
+                  >
+                    <Check size={14} />
+                    <span>บันทึกและเปิดใช้</span>
+                  </button>
+                </div>
+                {customKeySavedSuccess && (
+                  <div className="mt-2 text-xs text-emerald-800 font-semibold flex items-center gap-1.5 bg-emerald-100/80 p-2 rounded border border-emerald-300">
+                    <CheckCircle2 size={15} className="text-emerald-600 shrink-0" />
+                    <span>บันทึก Key ในระบบเรียบร้อยแล้ว! สถานะการเชื่อมต่อพร้อมใช้งาน</span>
+                  </div>
+                )}
+              </div>
+
               {/* Diagnostic status banner */}
               {keyTestStatus && (
                 <div className={`p-3 rounded-lg border text-xs leading-normal ${
@@ -2266,26 +2376,31 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
               )}
 
               <div className="bg-amber-50/80 border border-amber-200 rounded-lg p-3.5 text-xs text-amber-900">
-                ฟังก์ชันสร้างภาพผ้าม่านด้วย AI ทำงานผ่าน <strong>Google Gemini API</strong> บนเซิร์ฟเวอร์ เพื่อความปลอดภัยของข้อมูล จึงต้องมี API Key ในระบบ
+                โมเดลสร้างภาพผ้าม่านด้วย AI ทำงานผ่าน <strong>Google Gemini API</strong> (gemini-3.1-flash-image) ซึ่งจำเป็นต้องมี API Key ที่ผูก Billing (Pay-as-you-go) ใน Google Cloud หรือ AI Studio จึงจะสร้างภาพได้
               </div>
 
-              <div>
+              <div className="border-t border-gray-100 pt-3">
                 <h4 className="font-bold text-gray-900 text-sm mb-2 flex items-center gap-1.5">
-                  <span className="w-5 h-5 rounded-full bg-blue-600 text-white text-xs flex items-center justify-center font-bold">1</span>
-                  รับ Gemini API Key และเปิดใช้งาน Billing (Pay-as-you-go)
+                  <span className="w-5 h-5 rounded-full bg-blue-600 text-white text-xs flex items-center justify-center font-bold">2</span>
+                  วิธีที่ 2: ฝัง Key ลงในโค้ดไฟล์ server.ts โดยตรง
                 </h4>
-                <p className="text-xs text-gray-600 ml-6 leading-relaxed">
-                  เข้าเว็บไซต์ <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer" className="text-blue-600 underline font-semibold">Google AI Studio (aistudio.google.com/apikey)</a> แล้วกด <strong>Create API key</strong>
-                </p>
-                <div className="mt-2 ml-6 bg-blue-50 border border-blue-200 rounded p-2 text-[11px] text-blue-950 leading-relaxed">
-                  💡 <strong>ข้อกำหนดของ Google:</strong> โมเดลสร้างภาพ (gemini-3.1-flash-image) ต้องผูกบัตรเครดิต/Billing (Pay-as-you-go) ใน Google Cloud หรือ AI Studio จึงจะสร้างภาพได้ หากเป็น Free Tier จะมีโควต้าสร้างภาพเป็น 0
+                <div className="text-xs text-gray-600 ml-6 space-y-1.5 leading-relaxed">
+                  <p>
+                    หากคุณต้องการให้เซิร์ฟเวอร์มี Key ตลอดเวลาโดยไม่ต้องพึ่ง Environment Variable สามารถเปิดไฟล์ <code className="bg-gray-100 font-mono px-1 py-0.5 rounded text-purple-700 font-bold">server.ts</code> บรรทัดที่ 54 แล้วใส่ Key ในตัวแปร:
+                  </p>
+                  <pre className="bg-gray-900 text-gray-100 p-2.5 rounded font-mono text-[11px] overflow-x-auto">
+                    {`const HARDCODED_GEMINI_API_KEY = "วาง_API_KEY_ของคุณที่นี่";`}
+                  </pre>
+                  <p className="text-gray-500 text-[11px]">
+                    ระบบจะใช้ Key นี้เป็นค่าเริ่มต้นอัตโนมัติหากไม่มี Environment Variable
+                  </p>
                 </div>
               </div>
 
               <div className="border-t border-gray-100 pt-3">
                 <h4 className="font-bold text-gray-900 text-sm mb-2 flex items-center gap-1.5">
-                  <span className="w-5 h-5 rounded-full bg-black text-white text-xs flex items-center justify-center font-bold">2</span>
-                  ตั้งค่าบน Vercel (หากดีพลอยบน Vercel)
+                  <span className="w-5 h-5 rounded-full bg-black text-white text-xs flex items-center justify-center font-bold">3</span>
+                  วิธีที่ 3: ตั้งค่าบน Vercel (Environment Variables)
                 </h4>
                 <ol className="list-decimal list-inside text-xs text-gray-600 ml-2 space-y-1.5">
                   <li>เปิด <strong>Vercel Dashboard</strong> แล้วเลือกโปรเจกต์ของคุณ</li>
