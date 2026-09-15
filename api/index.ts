@@ -8,13 +8,16 @@ export default async function handler(req: Request, res: Response): Promise<void
 
     if (routeParam && typeof routeParam === "string") {
       const cleanParam = routeParam.replace(/^\/+/, "");
-      req.url = `/api/${cleanParam}`;
+      urlObj.searchParams.delete("__route");
+      const search = urlObj.searchParams.toString();
+      req.url = `/api/${cleanParam}${search ? `?${search}` : ""}`;
     } else {
       const routeMatches = (req.headers["x-now-route-matches"] || "") as string;
       const m = routeMatches.match(/(?:^|&)1=([^&]+)/);
       if (m && m[1]) {
         const captured = decodeURIComponent(m[1]).replace(/^\/+/, "");
-        req.url = `/api/${captured}`;
+        const search = urlObj.searchParams.toString();
+        req.url = `/api/${captured}${search ? `?${search}` : ""}`;
       }
     }
 

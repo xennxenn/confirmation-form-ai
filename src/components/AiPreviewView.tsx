@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { 
   ArrowLeft, Sparkles, Printer, CheckSquare, Square, 
-  Download, RefreshCw, Sliders, Check, AlertCircle, 
+  Download, RefreshCw, Sliders, Check, AlertCircle, CheckCircle2,
   Eye, Layers, Image as ImageIcon, Save, Trash2, X,
   Undo, Redo, Share2, FileText
 } from 'lucide-react';
@@ -71,6 +71,13 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
   // Server Gemini API Key configuration status
   const [geminiKeyConfigured, setGeminiKeyConfigured] = useState<boolean | null>(null);
   const [showKeyGuideModal, setShowKeyGuideModal] = useState(false);
+  const [keyTestStatus, setKeyTestStatus] = useState<{
+    checked: boolean;
+    success: boolean;
+    message: string;
+    details?: string;
+    keyPrefix?: string;
+  } | null>(null);
 
   // Keep live reference to items to strictly prevent stale closure race conditions in async operations
   const itemsRef = React.useRef(items);
@@ -165,6 +172,63 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
     }
   };
 
+  const handleTestConnection = async () => {
+    try {
+      setLoadingQuota(true);
+      setKeyTestStatus(null);
+      const [resQuota, resHealth] = await Promise.all([
+        fetch(`/api/ai-quota?username=${encodeURIComponent(appUser.username)}`)
+          .then(r => r.json())
+          .catch(() => null),
+        fetch('/api/health')
+          .then(r => r.json())
+          .catch(() => null),
+      ]);
+
+      const isConfigured = Boolean(
+        resQuota?.geminiKeyConfigured ||
+        resHealth?.geminiKeyConfigured ||
+        resHealth?.geminiKeyAvailable
+      );
+
+      if (isConfigured) {
+        setGeminiKeyConfigured(true);
+        const prefix = resHealth?.keyPrefix || resQuota?.keyPrefix || '';
+        const len = resHealth?.keyLength || resQuota?.keyLength || 0;
+        setKeyTestStatus({
+          checked: true,
+          success: true,
+          message: 'เชื่อมต่อ Gemini API สำเร็จแล้ว!',
+          details: prefix ? `พบ Key ในระบบ: ${prefix} (ความยาว ${len} ตัวอักษร)` : 'ตรวจพบ Key ในระบบเรียบร้อยแล้ว',
+          keyPrefix: prefix,
+        });
+        if (resQuota?.success) {
+          const u = typeof resQuota.usage === 'number' ? resQuota.usage : 0;
+          const l = typeof resQuota.limit === 'number' ? resQuota.limit : 20;
+          const rem = typeof resQuota.remaining === 'number' ? resQuota.remaining : Math.max(0, l - u);
+          setQuota({ usage: u, limit: l, remaining: rem, month: resQuota.month || '' });
+        }
+      } else {
+        setGeminiKeyConfigured(false);
+        setKeyTestStatus({
+          checked: true,
+          success: false,
+          message: 'เซิร์ฟเวอร์ยังตรวจไม่พบตัวแปร GEMINI_API_KEY',
+          details: 'หากเพิ่งเพิ่มตัวแปรใน Vercel กรุณาไปที่แท็บ Deployments > กดจุดสามจุด (...) > Redeploy เพื่อให้เซิร์ฟเวอร์โหลดค่าตัวแปรใหม่',
+        });
+      }
+    } catch (e: any) {
+      setKeyTestStatus({
+        checked: true,
+        success: false,
+        message: 'ไม่สามารถติดต่อเซิร์ฟเวอร์ได้',
+        details: e?.message || 'โปรดตรวจสอบการเชื่อมต่ออินเทอร์เน็ต',
+      });
+    } finally {
+      setLoadingQuota(false);
+    }
+  };
+
   useEffect(() => {
     fetchQuota();
   }, [appUser.username]);
@@ -186,11 +250,6 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
   const handleGenerate = async (item: CurtainItem) => {
     if (!item.image) {
       setDialog({ type: 'alert', message: 'กรุณาอัปโหลดรูปภาพหน้างานต้นฉบับในหน้าแก้ไขก่อน' });
-      return;
-    }
-
-    if (geminiKeyConfigured === false) {
-      setShowKeyGuideModal(true);
       return;
     }
 
@@ -841,7 +900,13 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
           throw new Error(data.message || `โควต้าสร้างรูป AI ของคุณหมดแล้วสำหรับเดือนนี้ (${userU}/${userL} ครั้ง คงเหลือ 0 ครั้ง) หากต้องการเพิ่มโควต้าโปรดติดต่อผู้ดูแลระบบ (Admin)`);
         }
         if (data?.isQuotaExceeded || data?.error === "GEMINI_QUOTA_EXCEEDED" || res.status === 429) {
-          throw new Error("โควต้าโมเดลสร้างรูปภาพ Gemini API เต็ม หรือบัญชีเป็น Free Tier (โมเดลสร้างรูปภาพต้องเปิดใช้งาน Billing/Pay-as-you-go ใน Google AI Studio)");
+          throw new Error(
+            "โควต้าสร้างรูปภาพ Gemini API เต็ม หรือบัญชีเป็น Free Tier\n\n" +
+            "📌 หมายเหตุสำคัญของ Google:\n" +
+            "Google กำหนดให้โมเดลสร้างรูปภาพ (gemini-3.1-flash-image) ต้องใช้งานผ่านโปรเจกต์ที่เปิดใช้งาน Billing (Pay-as-you-go) ใน Google AI Studio เท่านั้น\n" +
+            "หากบัญชีเป็น Free Tier ระบบของ Google จะตั้งโควต้าสร้างภาพเป็น 0\n\n" +
+            "👉 วิธีแก้ไข: ไปที่ Google AI Studio (aistudio.google.com) > เลือกเมนู Settings/Billing เพื่อเปิดใช้งาน Pay-as-you-go"
+          );
         }
         if (data?.message && (data.message.includes("GEMINI_API_KEY") || data.message.includes("API Key"))) {
           setGeminiKeyConfigured(false);
@@ -855,6 +920,8 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
         }
         throw new Error(data?.message || data?.error || 'การสร้างภาพล้มเหลว');
       }
+
+      setGeminiKeyConfigured(true);
 
       const currentHistory = Array.isArray(item.aiImages) ? item.aiImages : (item.aiImage ? [item.aiImage] : []);
       const updatedHistory = Array.from(new Set([data.imageUrl, ...currentHistory]));
@@ -903,10 +970,6 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
 
   // Batch generate
   const handleBatchGenerate = async () => {
-    if (geminiKeyConfigured === false) {
-      setShowKeyGuideModal(true);
-      return;
-    }
     const targets = items.filter(i => selectedIds.has(i.id) && i.image);
     if (targets.length === 0) {
       setDialog({ type: 'alert', message: 'กรุณาเลือกหน้าที่ต้องการสร้างรูปและมีรูปต้นฉบับ' });
@@ -2181,6 +2244,27 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
             </div>
 
             <div className="p-6 space-y-4 max-h-[75vh] overflow-y-auto text-sm text-gray-700 leading-relaxed">
+              {/* Diagnostic status banner */}
+              {keyTestStatus && (
+                <div className={`p-3 rounded-lg border text-xs leading-normal ${
+                  keyTestStatus.success 
+                    ? 'bg-emerald-50 border-emerald-300 text-emerald-900' 
+                    : 'bg-red-50 border-red-300 text-red-900'
+                }`}>
+                  <div className="flex items-center gap-2 font-bold">
+                    {keyTestStatus.success ? (
+                      <CheckCircle2 size={16} className="text-emerald-600 shrink-0" />
+                    ) : (
+                      <AlertCircle size={16} className="text-red-600 shrink-0" />
+                    )}
+                    <span>{keyTestStatus.message}</span>
+                  </div>
+                  {keyTestStatus.details && (
+                    <p className="mt-1 text-[11px] opacity-90 pl-6">{keyTestStatus.details}</p>
+                  )}
+                </div>
+              )}
+
               <div className="bg-amber-50/80 border border-amber-200 rounded-lg p-3.5 text-xs text-amber-900">
                 ฟังก์ชันสร้างภาพผ้าม่านด้วย AI ทำงานผ่าน <strong>Google Gemini API</strong> บนเซิร์ฟเวอร์ เพื่อความปลอดภัยของข้อมูล จึงต้องมี API Key ในระบบ
               </div>
@@ -2188,11 +2272,14 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
               <div>
                 <h4 className="font-bold text-gray-900 text-sm mb-2 flex items-center gap-1.5">
                   <span className="w-5 h-5 rounded-full bg-blue-600 text-white text-xs flex items-center justify-center font-bold">1</span>
-                  รับ Gemini API Key
+                  รับ Gemini API Key และเปิดใช้งาน Billing (Pay-as-you-go)
                 </h4>
-                <p className="text-xs text-gray-600 ml-6">
+                <p className="text-xs text-gray-600 ml-6 leading-relaxed">
                   เข้าเว็บไซต์ <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer" className="text-blue-600 underline font-semibold">Google AI Studio (aistudio.google.com/apikey)</a> แล้วกด <strong>Create API key</strong>
                 </p>
+                <div className="mt-2 ml-6 bg-blue-50 border border-blue-200 rounded p-2 text-[11px] text-blue-950 leading-relaxed">
+                  💡 <strong>ข้อกำหนดของ Google:</strong> โมเดลสร้างภาพ (gemini-3.1-flash-image) ต้องผูกบัตรเครดิต/Billing (Pay-as-you-go) ใน Google Cloud หรือ AI Studio จึงจะสร้างภาพได้ หากเป็น Free Tier จะมีโควต้าสร้างภาพเป็น 0
+                </div>
               </div>
 
               <div className="border-t border-gray-100 pt-3">
@@ -2209,7 +2296,7 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
                   <li>วาง API Key ที่ได้มาในช่อง Value</li>
                   <li>เลือกทุกช่อง (Production, Preview, Development) แล้วกด <strong>Save</strong></li>
                   <li className="text-red-700 font-bold bg-red-50 p-1.5 rounded border border-red-200 mt-1">
-                    ⚠️ สำคัญมาก: ไปที่แท็บ <strong>Deployments</strong> &gt; กดจุดสามจุด (...) ที่รายการล่าสุด &gt; เลือก <strong>Redeploy</strong> เพื่อให้ Vercel โหลดค่าตัวแปรใหม่!
+                    ⚠️ สำคัญมาก: ไปที่แท็บ <strong>Deployments</strong> &gt; กดจุดสามจุด (...) ที่รายการล่าสุด &gt; เลือก <strong>Redeploy</strong> เพื่อให้ Vercel โหลดค่าตัวแปรใหม่! (หากไม่กด Redeploy เซิร์ฟเวอร์จะยังคงใช้การตั้งค่าเดิม)
                   </li>
                 </ol>
               </div>
@@ -2225,23 +2312,29 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
               </div>
             </div>
 
-            <div className="p-4 bg-gray-50 border-t border-gray-200 flex items-center justify-between gap-3">
+            <div className="p-4 bg-gray-50 border-t border-gray-200 flex flex-wrap items-center justify-between gap-2">
               <button
-                onClick={() => {
-                  fetchQuota();
-                }}
+                onClick={handleTestConnection}
                 disabled={loadingQuota}
                 className="flex items-center gap-1.5 bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 font-bold px-3.5 py-2 rounded-lg text-xs transition-colors"
               >
                 <RefreshCw size={13} className={loadingQuota ? 'animate-spin' : ''} />
                 <span>{loadingQuota ? 'กำลังตรวจสอบ...' : 'ตรวจสอบการเชื่อมต่อใหม่'}</span>
               </button>
-              <button
-                onClick={() => setShowKeyGuideModal(false)}
-                className="bg-gray-800 hover:bg-gray-900 text-white font-bold px-4 py-2 rounded-lg text-xs shadow transition-colors"
-              >
-                เข้าใจแล้ว / ปิดหน้าต่าง
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setShowKeyGuideModal(false)}
+                  className="bg-amber-600 hover:bg-amber-700 text-white font-bold px-3 py-2 rounded-lg text-xs shadow transition-colors"
+                >
+                  ลองสร้างภาพดูเลย
+                </button>
+                <button
+                  onClick={() => setShowKeyGuideModal(false)}
+                  className="bg-gray-200 hover:bg-gray-300 text-gray-700 font-bold px-3.5 py-2 rounded-lg text-xs transition-colors"
+                >
+                  ปิดหน้าต่าง
+                </button>
+              </div>
             </div>
           </div>
         </div>

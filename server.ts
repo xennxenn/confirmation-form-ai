@@ -1,5 +1,5 @@
 import dotenv from "dotenv";
-dotenv.config({ override: true });
+dotenv.config();
 
 import express from "express";
 import path from "path";
@@ -50,14 +50,40 @@ function saveQuotaStore(data: QuotaStore) {
 }
 
 function getApiKey(): string {
-  const key = (
-    process.env.GEMINI_API_KEY ||
-    process.env.VITE_GEMINI_API_KEY ||
-    process.env.GOOGLE_API_KEY ||
-    process.env.API_KEY ||
-    ""
-  ).trim();
-  return key;
+  const env = process.env;
+  const candidates = [
+    env.GEMINI_API_KEY,
+    env.gemini_api_key,
+    env.Gemini_API_Key,
+    env.VITE_GEMINI_API_KEY,
+    env.GOOGLE_GEMINI_API_KEY,
+    env.google_gemini_api_key,
+    env.GOOGLE_API_KEY,
+    env.google_api_key,
+    env.GEMINI_KEY,
+    env.gemini_key,
+    env.API_KEY,
+    env.api_key,
+  ];
+
+  for (const c of candidates) {
+    if (typeof c === "string") {
+      const clean = c.trim().replace(/^["']|["']$/g, "").trim();
+      if (clean.length > 5) {
+        return clean;
+      }
+    }
+  }
+
+  // Also check if any key in process.env contains GEMINI
+  for (const [k, v] of Object.entries(env)) {
+    if (k.toUpperCase().includes("GEMINI") && typeof v === "string") {
+      const clean = v.trim().replace(/^["']|["']$/g, "").trim();
+      if (clean.length > 5) return clean;
+    }
+  }
+
+  return "";
 }
 
 let currentApiKey: string | null = null;
@@ -132,7 +158,11 @@ export const app = express();
 app.use((req, _res, next) => {
   const queryRoute = (req.query as any)?.__route;
   if (queryRoute && typeof queryRoute === "string") {
-    req.url = `/api/${queryRoute.replace(/^\/+/, "")}`;
+    const cleanRoute = queryRoute.replace(/^\/+/, "");
+    const origQuery = { ...(req.query as any) };
+    delete origQuery.__route;
+    const searchParams = new URLSearchParams(origQuery as any).toString();
+    req.url = `/api/${cleanRoute}${searchParams ? `?${searchParams}` : ""}`;
     return next();
   }
 
@@ -203,11 +233,14 @@ const apiRouter = express.Router();
 
 // Health check
 const healthHandler = (_req: express.Request, res: express.Response) => {
-  const hasKey = !!getApiKey();
+  const key = getApiKey();
+  const hasKey = !!key;
   res.json({
     status: "ok",
     geminiKeyAvailable: hasKey,
     geminiKeyConfigured: hasKey,
+    keyLength: key ? key.length : 0,
+    keyPrefix: key ? `${key.slice(0, 4)}...${key.slice(-4)}` : "",
   });
 };
 apiRouter.get("/health", healthHandler);
@@ -223,7 +256,8 @@ const aiQuotaHandler = (req: express.Request, res: express.Response) => {
     const userLimit = store.monthlyLimits[username] ?? store.defaultMonthlyLimit ?? 20;
     const userUsage = store.usage[month]?.[username] ?? 0;
     const remaining = Math.max(0, userLimit - userUsage);
-    const hasKey = !!getApiKey();
+    const key = getApiKey();
+    const hasKey = !!key;
 
     res.json({
       success: true,
@@ -236,9 +270,16 @@ const aiQuotaHandler = (req: express.Request, res: express.Response) => {
       monthlyLimits: store.monthlyLimits,
       allUsage: store.usage[month] || {},
       geminiKeyConfigured: hasKey,
+      keyLength: key ? key.length : 0,
+      keyPrefix: key ? `${key.slice(0, 4)}...${key.slice(-4)}` : "",
     });
   } catch (err: any) {
-    res.status(500).json({ error: err.message, geminiKeyConfigured: !!getApiKey() });
+    const key = getApiKey();
+    res.status(500).json({
+      error: err.message,
+      geminiKeyConfigured: !!key,
+      keyLength: key ? key.length : 0,
+    });
   }
 };
 apiRouter.get("/ai-quota", aiQuotaHandler);
