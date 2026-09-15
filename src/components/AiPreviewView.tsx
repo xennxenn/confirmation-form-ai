@@ -282,6 +282,26 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
     fetchQuota();
   }, [appUser.username]);
 
+  // Try generate now from modal
+  const handleTryGenerateNow = () => {
+    setShowKeyGuideModal(false);
+    const targetItem = items.find(i => i.image && !i.aiImage) || items.find(i => i.image);
+    if (targetItem) {
+      setTimeout(() => {
+        const el = document.getElementById(`curtain-item-${targetItem.id}`);
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+        handleGenerate(targetItem);
+      }, 100);
+    } else {
+      setDialog({
+        type: 'alert',
+        message: 'กรุณาอัปโหลดรูปหน้างานในรายการผ้าม่านก่อน แล้วกดปุ่ม "สร้างรูปด้วย AI"',
+      });
+    }
+  };
+
   // Toggle selection
   const toggleSelect = (id: string) => {
     setSelectedIds(prev => {
@@ -1357,14 +1377,16 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
               </button>
             )}
 
-            {/* Gemini API Key Settings Button */}
-            <button
-              onClick={() => setShowKeyGuideModal(true)}
-              className="flex items-center gap-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors"
-              title="ตั้งค่า หรือฝัง Gemini API Key"
-            >
-              <Key size={14} /> ตั้งค่า API Key
-            </button>
+            {/* Gemini API Key Settings Button (only show if key is completely missing) */}
+            {geminiKeyConfigured === false && (
+              <button
+                onClick={() => setShowKeyGuideModal(true)}
+                className="flex items-center gap-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors"
+                title="ตั้งค่า หรือตรวจสอบ Gemini API Key"
+              >
+                <Key size={14} /> ตั้งค่า API Key
+              </button>
+            )}
 
             {/* Share / PDF Export Button */}
             <button
@@ -1735,6 +1757,7 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
           return (
             <div
               key={item.id}
+              id={`curtain-item-${item.id}`}
               className={`ai-preview-page w-full relative transition-all ${
                 isSelected ? 'opacity-100' : 'opacity-60 print-hidden-unselected'
               } ${isLastItem ? 'ai-preview-page-last' : ''}`}
@@ -2438,7 +2461,7 @@ export const AiPreviewView: React.FC<AiPreviewViewProps> = ({
               </button>
               <div className="flex items-center gap-2">
                 <button
-                  onClick={() => setShowKeyGuideModal(false)}
+                  onClick={handleTryGenerateNow}
                   className="bg-amber-600 hover:bg-amber-700 text-white font-bold px-3 py-2 rounded-lg text-xs shadow transition-colors"
                 >
                   ลองสร้างภาพดูเลย
